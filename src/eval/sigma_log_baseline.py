@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
@@ -26,6 +26,7 @@ class RealGestureStats:
     displacements: np.ndarray
     sequences: List[np.ndarray]
     templates: List[List[StrokeParams]]
+    template_groups: dict[int, List[List[StrokeParams]]] = field(default_factory=dict)
 
 
 class FunctionBasedTrajectoryGenerator:
@@ -155,7 +156,16 @@ class SigmaLognormalTrajectoryGenerator:
         return stroke.theta_start + (stroke.theta_end - stroke.theta_start) * logistics
 
     def generate_sequence(self) -> np.ndarray:
-        template = self.templates[self.rng.integers(0, len(self.templates))]
+        disp = self.stats.displacements[self.rng.integers(0, len(self.stats.displacements))]
+        target_length = float(self.rng.choice(self.stats.lengths)) * float(self.rng.uniform(0.9, 1.1))
+
+        angle = math.atan2(disp[1], disp[0])
+        bin_idx = int(((angle + math.pi) / (2 * math.pi)) * 8) % 8
+        candidate_group = self.stats.template_groups.get(bin_idx, [])
+        if candidate_group:
+            template = candidate_group[self.rng.integers(0, len(candidate_group))]
+        else:
+            template = self.templates[self.rng.integers(0, len(self.templates))]
         strokes = [self._jitter_stroke(stroke) for stroke in template]
         max_time = max(stroke.t0 + math.exp(stroke.mu + 2.0 * stroke.sigma) for stroke in strokes)
         max_time = max_time * float(self.rng.uniform(0.9, 1.2))
@@ -187,16 +197,25 @@ class SigmaLognormalTrajectoryGenerator:
         dx = np.diff(points[:, 0])
         dy = np.diff(points[:, 1])
         traj_length = np.sum(np.sqrt(dx**2 + dy**2)) + 1e-9
-        target_length = float(self.rng.choice(self.stats.lengths))
-        dx *= target_length / traj_length
-        dy *= target_length / traj_length
+        scale = target_length / traj_length
+        dx *= scale
+        dy *= scale
 
-        duration = float(self.rng.choice(self.stats.durations))
+        if np.linalg.norm(disp) > 1e-6:
+            base_end = np.array([np.sum(dx), np.sum(dy)])
+            base_norm = np.linalg.norm(base_end) + 1e-9
+            angle = math.atan2(disp[1], disp[0]) - math.atan2(base_end[1], base_end[0])
+            rot = np.array([[math.cos(angle), -math.sin(angle)], [math.sin(angle), math.cos(angle)]])
+            stacked = np.stack([dx, dy], axis=1) @ rot.T
+            dx = stacked[:, 0]
+            dy = stacked[:, 1]
+
+        duration = float(self.rng.choice(self.stats.durations)) * float(self.rng.uniform(0.9, 1.1))
         dt = np.diff(times)
         dt = np.clip(dt, 1e-4, None)
         dt = dt / dt.sum() * duration
 
-        noise_scale = target_length * 0.02
+        noise_scale = target_length * 0.015
         dx += self.rng.normal(scale=noise_scale, size=dx.shape)
         dy += self.rng.normal(scale=noise_scale, size=dy.shape)
 
@@ -221,6 +240,7 @@ def _collect_real_stats(dataset: GestureDataset) -> RealGestureStats:
     displacements: List[np.ndarray] = []
     sequences: List[np.ndarray] = []
     templates: List[List[StrokeParams]] = []
+    template_groups: dict[int, List[List[StrokeParams]]] = {i: [] for i in range(8)}
 
     for sequence, _, label in dataset.samples:
         if label.item() != 1.0:
@@ -231,12 +251,16 @@ def _collect_real_stats(dataset: GestureDataset) -> RealGestureStats:
         dt = seq_np[:, 2]
         lengths.append(float(np.sum(np.sqrt(dx**2 + dy**2))))
         durations.append(float(np.sum(dt)))
-        displacements.append(np.array([np.sum(dx), np.sum(dy)], dtype=np.float32))
+        disp_vec = np.array([np.sum(dx), np.sum(dy)], dtype=np.float32)
+        displacements.append(disp_vec)
         sequences.append(seq_np)
         gesture = tensor_to_gesture(sequence)
         strokes = decompose_sigma_lognormal(gesture)
         if strokes:
             templates.append(strokes)
+            angle = math.atan2(disp_vec[1], disp_vec[0])
+            bin_idx = int(((angle + math.pi) / (2 * math.pi)) * 8) % 8
+            template_groups.setdefault(bin_idx, []).append(strokes)
 
     return RealGestureStats(
         lengths=np.array(lengths),
@@ -244,6 +268,7 @@ def _collect_real_stats(dataset: GestureDataset) -> RealGestureStats:
         displacements=np.stack(displacements),
         sequences=sequences,
         templates=templates,
+        template_groups=template_groups,
     )
 
 
@@ -281,6 +306,7 @@ def run_baseline(
     seed: int,
     samples_per_case: int,
     generator_type: str = "function",
+    gan_dir: Path | None = None,
     output: Path | None = None,
 ) -> dict:
     dataset_cfg = GestureDatasetConfig(
@@ -334,6 +360,33 @@ def run_baseline(
                     "details": extras,
                 }
             )
+    elif generator_type == "gan":
+        if gan_dir is None:
+            raise ValueError("gan_dir must be provided for GAN evaluation")
+        files = sorted(Path(gan_dir).glob("**/*.npz"))
+        if not files:
+            raise RuntimeError(f"No .npz sequences found under {gan_dir}")
+        rng = np.random.default_rng(seed)
+        for file_path in files:
+            data = np.load(file_path)
+            sequences = data.get("sequences")
+            if sequences is None:
+                continue
+            if sequences.ndim == 2:
+                sequences = sequences[None, ...]
+            idxs = rng.choice(sequences.shape[0], size=min(samples_per_case, sequences.shape[0]), replace=sequences.shape[0] < samples_per_case)
+            selected = [sequences[i] for i in idxs]
+            synthetic_features = _features_from_sequences(selected)
+            acc, extras = _train_classifier(real_features, synthetic_features, seed=seed)
+            results.append(
+                {
+                    "shape": "gan",
+                    "velocity": file_path.name,
+                    "accuracy": acc,
+                    "error_rate": 1.0 - acc,
+                    "details": extras,
+                }
+            )
     else:
         raise ValueError(f"Unsupported generator type: {generator_type}")
 
@@ -361,10 +414,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=1337, help="Random seed")
     parser.add_argument(
         "--generator",
-        choices=["function", "sigma"],
+        choices=["function", "sigma", "gan"],
         default="function",
         help="Synthetic trajectory generator type",
     )
+    parser.add_argument("--gan-dir", type=Path, default=None, help="Directory containing GAN sample NPZ files")
     parser.add_argument("--output", type=Path, default=None, help="Optional JSON output path")
     args = parser.parse_args()
 
@@ -375,6 +429,7 @@ def main() -> None:
         seed=args.seed,
         samples_per_case=args.samples,
         generator_type=args.generator,
+        gan_dir=args.gan_dir,
         output=args.output,
     )
     for item in summary["results"]:

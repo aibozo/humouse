@@ -12,6 +12,7 @@ data:
   cache_dir: data/processed
   replay_path: checkpoints/gan/replay_buffer.pt
   replay_sample_ratio: 1.0
+  feature_mode: neuromotor
   eval_dataset_ids: []
   cross_eval_manifest: conf/datasets/cross_eval.yaml
 

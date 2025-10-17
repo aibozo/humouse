@@ -158,6 +158,7 @@ def _prepare_dataloaders(experiment_cfg: DetectorExperimentConfig) -> tuple[Data
         user_filter=experiment_cfg.data.user_filter,
         normalize_sequences=experiment_cfg.data.normalize_sequences,
         normalize_features=experiment_cfg.data.normalize_features,
+        feature_mode=experiment_cfg.data.feature_mode,
     )
     dataset = GestureDataset(dataset_cfg)
     if len(dataset) == 0:
@@ -200,6 +201,7 @@ def _evaluate_on_dataset(
         user_filter=entry.user_filter,
         normalize_sequences=experiment_cfg.data.normalize_sequences,
         normalize_features=experiment_cfg.data.normalize_features,
+        feature_mode=experiment_cfg.data.feature_mode,
     )
     dataset = GestureDataset(eval_cfg)
     if len(dataset) == 0:

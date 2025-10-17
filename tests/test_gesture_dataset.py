@@ -23,6 +23,20 @@ def test_gesture_dataset_produces_samples():
     assert torch.isfinite(sequence).all()
 
 
+def test_gesture_dataset_sigma_lognormal_features():
+    config = GestureDatasetConfig(
+        dataset_id="balabit",
+        sequence_length=32,
+        max_gestures=10,
+        feature_mode="sigma_lognormal",
+        normalize_features=False,
+    )
+    dataset = GestureDataset(config)
+    assert len(dataset) > 0
+    _, features, _ = dataset[0]
+    assert features.shape[-1] == 37
+
+
 def test_gesture_dataset_cache_roundtrip(tmp_path):
     cache_dir = tmp_path / "cache"
     config = GestureDatasetConfig(

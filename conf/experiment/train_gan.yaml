@@ -9,8 +9,10 @@ data:
   max_gestures: 4096
   cache_enabled: true
   cache_dir: data/processed
+  feature_mode: neuromotor
 
 model:
+  architecture: tcn
   generator:
     latent_dim: 64
     condition_dim: 15
@@ -44,6 +46,7 @@ training:
   detector_epochs_per_update: 1
   reconstruction_epochs: 0
   reconstruction_loss_weight: 1.0
+  adversarial_type: wgan
 
 logging:
   target: wandb

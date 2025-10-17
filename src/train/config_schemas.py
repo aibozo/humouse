@@ -28,6 +28,7 @@ class DataConfig:
     cross_eval_manifest: Optional[str] = None
     normalize_sequences: bool = True
     normalize_features: bool = True
+    feature_mode: str = "neuromotor"
 
 
 @dataclass
@@ -50,6 +51,7 @@ class GanTrainingConfig:
     detector_epochs_per_update: int = 1
     reconstruction_epochs: int = 0
     reconstruction_loss_weight: float = 1.0
+    adversarial_type: str = "wgan"
 
 
 @dataclass
@@ -63,6 +65,7 @@ class DetectorTrainingConfig:
 
 @dataclass
 class GanModelConfig:
+    architecture: str = "tcn"
     generator: GeneratorConfig
     discriminator: DiscriminatorConfig
 

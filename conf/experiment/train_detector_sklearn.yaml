@@ -1,0 +1,29 @@
+experiment_name: train_detector_sklearn
+seed: 1337
+
+data:
+  dataset_id: balabit
+  sequence_length: 64
+  batch_size: 128
+  num_workers: 4
+  use_generated_negatives: true
+  max_gestures: 4096
+  cache_enabled: true
+  cache_dir: data/processed
+  replay_path: checkpoints/gan/replay_buffer.pt
+  replay_sample_ratio: 1.0
+  feature_mode: sigma_lognormal
+  normalize_sequences: true
+  normalize_features: true
+
+model:
+  type: random_forest
+  params:
+    n_estimators: 300
+    max_depth: null
+    n_jobs: -1
+  test_size: 0.2
+
+logging:
+  checkpoint_dir: checkpoints/detector_sklearn
+

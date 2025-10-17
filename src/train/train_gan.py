@@ -15,6 +15,7 @@ from torch import nn, optim
 from data.dataset import GestureDataset, GestureDatasetConfig
 from models.discriminator import DiscriminatorConfig, GestureDiscriminator
 from models.generator import ConditionalGenerator, GeneratorConfig
+from models.gan_lstm import LSTMGenerator, LSTMDiscriminator
 from train.config_schemas import (
     DataConfig,
     GanExperimentConfig,
@@ -27,7 +28,10 @@ from utils.housekeeping import tidy_checkpoint_artifacts
 from utils.logging import CSVMetricLogger, LoggingConfig, experiment_logger, write_summary_json, log_wandb_artifact
 from utils.plotting import plot_metric_trends
 from utils.eval import feature_distribution_metrics, sequence_diversity_metric
-from features import compute_features_from_sequence
+from features import (
+    compute_features_from_sequence,
+    sigma_lognormal_features_from_sequence,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +42,11 @@ def _build_experiment_config(cfg: DictConfig) -> tuple[GanExperimentConfig, Dict
         cfg_dict = cfg_dict["experiment"]
 
     data_cfg = DataConfig(**cfg_dict["data"])
+    model_section = cfg_dict["model"]
     model_cfg = GanModelConfig(
-        generator=GeneratorConfig(**cfg_dict["model"]["generator"]),
-        discriminator=DiscriminatorConfig(**cfg_dict["model"]["discriminator"]),
+        architecture=model_section.get("architecture", "tcn"),
+        generator=GeneratorConfig(**model_section["generator"]),
+        discriminator=DiscriminatorConfig(**model_section["discriminator"]),
     )
     training_section = cfg_dict["training"]
     training_cfg = GanTrainingConfig(
@@ -56,6 +62,7 @@ def _build_experiment_config(cfg: DictConfig) -> tuple[GanExperimentConfig, Dict
         replay_buffer_path=training_section.get("replay_buffer_path", "checkpoints/gan/replay_buffer.pt"),
         replay_samples_per_epoch=training_section.get("replay_samples_per_epoch", 256),
         replay_buffer_max_size=training_section.get("replay_buffer_max_size", 5000),
+        adversarial_type=training_section.get("adversarial_type", "wgan"),
     )
     logging_cfg = LoggingConfig(**cfg_dict["logging"])
 
@@ -90,6 +97,7 @@ def _prepare_dataset_and_dataloader(
         user_filter=experiment_cfg.data.user_filter,
         normalize_sequences=experiment_cfg.data.normalize_sequences,
         normalize_features=experiment_cfg.data.normalize_features,
+        feature_mode=experiment_cfg.data.feature_mode,
     )
     dataset = GestureDataset(dataset_cfg)
     if len(dataset) == 0:
@@ -140,6 +148,23 @@ def _get_condition(features: torch.Tensor, target_dim: int) -> torch.Tensor:
         return features[..., :target_dim]
     pad = torch.zeros(features.size(0), target_dim - features.size(-1), device=features.device, dtype=features.dtype)
     return torch.cat([features, pad], dim=-1)
+
+
+def _feature_tensor_from_sequences(
+    dataset: GestureDataset,
+    sequences: torch.Tensor,
+    *,
+    normalize: bool = True,
+) -> torch.Tensor:
+    if dataset.config.feature_mode == "neuromotor":
+        feats = torch.stack([compute_features_from_sequence(seq) for seq in sequences])
+    elif dataset.config.feature_mode == "sigma_lognormal":
+        feats = torch.stack([sigma_lognormal_features_from_sequence(seq) for seq in sequences])
+    else:
+        raise ValueError(f"Unsupported feature_mode: {dataset.config.feature_mode}")
+    if normalize and dataset.config.normalize_features:
+        feats = dataset.normalize_features(feats)
+    return feats
 
 
 def _save_generated_samples(samples: torch.Tensor, out_dir: Path, epoch: int, step: int) -> Path:
@@ -223,7 +248,6 @@ def _training_loop(
     real_feature_tensor = real_feature_cpu.to(device)
     real_feature_np = real_feature_cpu.numpy()
     feature_pool = real_feature_tensor
-    feat_mean_cpu, feat_std_cpu = dataset.get_feature_stats()
     sample_dir = Path(experiment_cfg.logging.checkpoint_dir) / "samples"
     step = 0
     detector_metrics_logger = CSVMetricLogger(
@@ -241,6 +265,9 @@ def _training_loop(
     )
 
     last_metrics: Dict[str, Any] = {}
+    adversarial_type = experiment_cfg.training.adversarial_type.lower()
+    use_wgan = adversarial_type == "wgan"
+    bce_loss = nn.BCEWithLogitsLoss() if not use_wgan else None
 
     for epoch in range(1, experiment_cfg.training.epochs + 1):
         for batch in dataloader:
@@ -259,16 +286,22 @@ def _training_loop(
 
                 real_scores, _ = discriminator(real_sequences, condition)
                 fake_scores, _ = discriminator(fake_sequences, condition)
-
-                gp = _compute_gradient_penalty(
-                    discriminator,
-                    real_sequences,
-                    fake_sequences,
-                    condition,
-                    device,
-                )
-
-                d_loss = fake_scores.mean() - real_scores.mean() + experiment_cfg.training.gradient_penalty_weight * gp
+                if use_wgan:
+                    gp = _compute_gradient_penalty(
+                        discriminator,
+                        real_sequences,
+                        fake_sequences,
+                        condition,
+                        device,
+                    )
+                    d_loss = fake_scores.mean() - real_scores.mean() + experiment_cfg.training.gradient_penalty_weight * gp
+                else:
+                    assert bce_loss is not None
+                    real_labels = torch.ones_like(real_scores)
+                    fake_labels = torch.zeros_like(fake_scores)
+                    real_loss = bce_loss(real_scores, real_labels)
+                    fake_loss = bce_loss(fake_scores, fake_labels)
+                    d_loss = 0.5 * (real_loss + fake_loss)
 
                 d_optimizer.zero_grad()
                 d_loss.backward()
@@ -281,7 +314,12 @@ def _training_loop(
             z = torch.randn(real_sequences.size(0), experiment_cfg.model.generator.latent_dim, device=device)
             generated = generator(z, condition)
             fake_scores, _ = discriminator(generated, condition)
-            g_loss = -fake_scores.mean()
+            if use_wgan:
+                g_loss = -fake_scores.mean()
+            else:
+                assert bce_loss is not None
+                target_labels = torch.ones_like(fake_scores)
+                g_loss = bce_loss(fake_scores, target_labels)
 
             g_optimizer.zero_grad()
             g_loss.backward()
@@ -300,18 +338,13 @@ def _training_loop(
             generated_cpu = generated.detach().cpu()
             denorm_generated = dataset.denormalize_sequences(generated_cpu)
 
+            fake_feature_batch = None
             if log_metrics:
                 with torch.no_grad():
-                    feature_vectors = torch.stack(
-                        [compute_features_from_sequence(seq) for seq in denorm_generated]
-                    )
-                    if dataset.config.normalize_features:
-                        norm_fake = (feature_vectors - feat_mean_cpu.to(feature_vectors.dtype)) / feat_std_cpu.to(feature_vectors.dtype)
-                    else:
-                        norm_fake = feature_vectors
+                    fake_feature_batch = _feature_tensor_from_sequences(dataset, denorm_generated)
                     fd_metrics = feature_distribution_metrics(
                         real_feature_np,
-                        norm_fake.numpy(),
+                        fake_feature_batch.numpy(),
                     )
                     diversity = sequence_diversity_metric(denorm_generated.numpy())
                 metrics_payload.update(
@@ -353,9 +386,7 @@ def _training_loop(
                 z = torch.randn(cond_batch.size(0), experiment_cfg.model.generator.latent_dim, device=device)
                 generated_batch = generator(z, cond_batch).detach().cpu()
                 denorm_batch = dataset.denormalize_sequences(generated_batch)
-                feature_vectors = torch.stack(
-                    [compute_features_from_sequence(seq) for seq in denorm_batch],
-                )
+                feature_vectors = _feature_tensor_from_sequences(dataset, denorm_batch, normalize=False)
                 buffer.add(denorm_batch, feature_vectors)
                 buffer.save()
 
@@ -379,6 +410,7 @@ def _training_loop(
             detector_cfg.data.replay_sample_ratio = 1.0
             detector_cfg.data.normalize_sequences = experiment_cfg.data.normalize_sequences
             detector_cfg.data.normalize_features = experiment_cfg.data.normalize_features
+            detector_cfg.data.feature_mode = experiment_cfg.data.feature_mode
             detector_cfg.logging.target = "none"
             detector_cfg.logging.checkpoint_dir = experiment_cfg.logging.checkpoint_dir
 
@@ -438,8 +470,14 @@ def main(cfg: DictConfig) -> None:
     dataset, dataloader = _prepare_dataset_and_dataloader(experiment_cfg)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    generator = ConditionalGenerator(experiment_cfg.model.generator).to(device)
-    discriminator = GestureDiscriminator(experiment_cfg.model.discriminator).to(device)
+    if experiment_cfg.model.architecture == "tcn":
+        generator = ConditionalGenerator(experiment_cfg.model.generator).to(device)
+        discriminator = GestureDiscriminator(experiment_cfg.model.discriminator).to(device)
+    elif experiment_cfg.model.architecture == "lstm":
+        generator = LSTMGenerator(experiment_cfg.model.generator).to(device)
+        discriminator = LSTMDiscriminator(experiment_cfg.model.discriminator).to(device)
+    else:
+        raise ValueError(f"Unsupported model architecture: {experiment_cfg.model.architecture}")
     metrics_logger = CSVMetricLogger(
         Path(experiment_cfg.logging.checkpoint_dir) / "metrics.csv",
         fieldnames=[

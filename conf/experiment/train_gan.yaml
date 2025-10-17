@@ -1,0 +1,51 @@
+experiment_name: train_gan_baseline
+seed: 1337
+
+data:
+  dataset_id: balabit
+  sequence_length: 64
+  batch_size: 64
+  num_workers: 4
+  max_gestures: 4096
+  cache_enabled: true
+  cache_dir: data/processed
+
+model:
+  generator:
+    latent_dim: 64
+    condition_dim: 15
+    hidden_dim: 128
+    target_len: 64
+    num_layers: 3
+  discriminator:
+    input_dim: 3
+    condition_dim: 15
+    hidden_dim: 128
+    num_layers: 4
+
+training:
+  epochs: 50
+  lr:
+    generator: 0.0001
+    discriminator: 0.0004
+  betas: [0.5, 0.9]
+  gradient_penalty_weight: 10.0
+  discriminator_steps: 5
+  log_interval: 50
+  sample_interval: 200
+  replay_buffer_path: checkpoints/gan/replay_buffer.pt
+  replay_samples_per_epoch: 256
+  replay_buffer_max_size: 5000
+  co_train_detector: false
+  detector_update_every: 5
+  detector_config_path: conf/experiment/train_detector.yaml
+  detector_epochs_per_update: 1
+
+logging:
+  target: wandb
+  project: mouse-gan
+  entity: null
+  mode: offline
+  log_interval: 50
+  checkpoint_dir: checkpoints/gan
+  tags: [baseline, gan]

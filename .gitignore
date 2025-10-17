@@ -1,0 +1,32 @@
+# Virtual environments
+.venv/
+
+# Python cache and artifacts
+__pycache__/
+*.py[cod]
+*.so
+
+# Test and coverage outputs
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editors and tooling
+.vscode/
+.idea/
+*.swp
+
+# Experiment artifacts and datasets
+checkpoints/
+outputs/
+wandb/
+logs/
+
+# Data directories
+Data/
+data/
+datasets/
+
+# OS files
+.DS_Store
+Thumbs.db

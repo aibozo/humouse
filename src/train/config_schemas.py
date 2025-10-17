@@ -65,9 +65,9 @@ class DetectorTrainingConfig:
 
 @dataclass
 class GanModelConfig:
-    architecture: str = "tcn"
     generator: GeneratorConfig
     discriminator: DiscriminatorConfig
+    architecture: str = "tcn"
 
 
 @dataclass

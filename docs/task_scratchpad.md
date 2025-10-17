@@ -14,6 +14,7 @@ Use this document to track actionable items, progress, and open questions. Updat
 - *(empty — add blockers as they arise)*
 
 ## Done / Notes
+- 2025-10-16: Added Sigma-Lognormal baseline evaluator (`src/eval/sigma_log_baseline.py`) generating function-based synthetic trajectories and RandomForest metrics per shape/velocity profile.
 - 2025-02-14: Created `.venv` (Python 3.12) and installed dependencies from `requirements.txt`; generated `requirements.lock` for reproducibility.
 - 2025-02-14: Inventoried local datasets and documented schema/integration notes in `docs/data_inventory.md`, including citations for all datasets.
 - 2025-02-14: Added dataset registry and validation utilities (`src/data/registry.py`, `src/data/loaders.py`) with pytest coverage (`tests/test_dataset_registry.py`).

@@ -17,6 +17,7 @@ class GeneratorConfig:
     hidden_dim: int = 128
     target_len: int = 64
     num_layers: int = 3
+    use_spectral_norm: bool = False
 
 
 class ConditionalGenerator(nn.Module):
@@ -24,9 +25,21 @@ class ConditionalGenerator(nn.Module):
         super().__init__()
         self.config = config
         input_dim = config.latent_dim + config.condition_dim
-        self.fc = mlp(input_dim, config.hidden_dim * config.target_len)
-        self.decoder = ResidualTCN(config.hidden_dim, config.hidden_dim, num_layers=config.num_layers)
-        self.proj = nn.Conv1d(config.hidden_dim, 3, kernel_size=1)
+        self.fc = mlp(
+            input_dim,
+            config.hidden_dim * config.target_len,
+            use_spectral_norm=config.use_spectral_norm,
+        )
+        self.decoder = ResidualTCN(
+            config.hidden_dim,
+            config.hidden_dim,
+            num_layers=config.num_layers,
+            use_spectral_norm=config.use_spectral_norm,
+        )
+        proj_layer = nn.Conv1d(config.hidden_dim, 3, kernel_size=1)
+        if config.use_spectral_norm:
+            proj_layer = nn.utils.spectral_norm(proj_layer)
+        self.proj = proj_layer
         self.activation_xy = nn.Tanh()
         self.activation_dt = nn.Softplus()
 
@@ -47,4 +60,3 @@ class ConditionalGenerator(nn.Module):
         z = torch.randn(num_samples, self.config.latent_dim, device=cond.device, dtype=cond.dtype)
         cond = cond[:num_samples]
         return self.forward(z, cond)
-

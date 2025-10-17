@@ -17,11 +17,13 @@ model:
     hidden_dim: 128
     target_len: 64
     num_layers: 3
+    use_spectral_norm: false
   discriminator:
     input_dim: 3
     condition_dim: 15
     hidden_dim: 128
     num_layers: 4
+    use_spectral_norm: false
 
 training:
   epochs: 50
@@ -40,6 +42,8 @@ training:
   detector_update_every: 5
   detector_config_path: conf/experiment/train_detector.yaml
   detector_epochs_per_update: 1
+  reconstruction_epochs: 0
+  reconstruction_loss_weight: 1.0
 
 logging:
   target: wandb

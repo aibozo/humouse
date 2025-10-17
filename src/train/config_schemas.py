@@ -48,6 +48,8 @@ class GanTrainingConfig:
     detector_update_every: int = 0
     detector_config_path: Optional[str] = None
     detector_epochs_per_update: int = 1
+    reconstruction_epochs: int = 0
+    reconstruction_loss_weight: float = 1.0
 
 
 @dataclass

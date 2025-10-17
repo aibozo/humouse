@@ -15,16 +15,36 @@ class DiscriminatorConfig:
     condition_dim: int = 16
     hidden_dim: int = 128
     num_layers: int = 4
+    use_spectral_norm: bool = False
 
 
 class GestureDiscriminator(nn.Module):
     def __init__(self, config: DiscriminatorConfig):
         super().__init__()
         self.config = config
-        self.condition_mlp = mlp(config.condition_dim, config.hidden_dim)
-        self.encoder = ResidualTCN(config.input_dim, config.hidden_dim, num_layers=config.num_layers)
-        self.critic_head = mlp(config.hidden_dim, config.hidden_dim, 1)
-        self.aux_head = mlp(config.hidden_dim, config.hidden_dim, 4)
+        self.condition_mlp = mlp(
+            config.condition_dim,
+            config.hidden_dim,
+            use_spectral_norm=config.use_spectral_norm,
+        )
+        self.encoder = ResidualTCN(
+            config.input_dim,
+            config.hidden_dim,
+            num_layers=config.num_layers,
+            use_spectral_norm=config.use_spectral_norm,
+        )
+        self.critic_head = mlp(
+            config.hidden_dim,
+            config.hidden_dim,
+            1,
+            use_spectral_norm=config.use_spectral_norm,
+        )
+        self.aux_head = mlp(
+            config.hidden_dim,
+            config.hidden_dim,
+            4,
+            use_spectral_norm=config.use_spectral_norm,
+        )
 
     def forward(self, sequence: torch.Tensor, cond: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         # sequence: (B, L, C)
@@ -36,4 +56,3 @@ class GestureDiscriminator(nn.Module):
         critic = self.critic_head(fused)
         aux = self.aux_head(fused)
         return critic.squeeze(-1), aux
-

@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import torch
 from omegaconf import DictConfig, OmegaConf
-from torch import optim
+from torch import nn, optim
 
 from data.dataset import GestureDataset, GestureDatasetConfig
 from models.discriminator import DiscriminatorConfig, GestureDiscriminator
@@ -149,6 +149,49 @@ def _save_generated_samples(samples: torch.Tensor, out_dir: Path, epoch: int, st
     return path
 
 
+def _reconstruction_warmup(
+    experiment_cfg: GanExperimentConfig,
+    generator: ConditionalGenerator,
+    dataloader: torch.utils.data.DataLoader,
+    device: torch.device,
+    run,
+) -> None:
+    epochs = experiment_cfg.training.reconstruction_epochs
+    if epochs <= 0:
+        return
+
+    logger.info("Starting reconstruction warm-up for %d epoch(s)", epochs)
+    criterion = nn.L1Loss()
+    optimizer = optim.Adam(
+        generator.parameters(),
+        lr=experiment_cfg.training.lr_generator,
+        betas=(experiment_cfg.training.beta1, experiment_cfg.training.beta2),
+    )
+
+    for epoch in range(1, epochs + 1):
+        total_loss = 0.0
+        total_samples = 0
+        generator.train()
+        for batch in dataloader:
+            real_sequences, features, _ = _to_device(batch, device)
+            condition = _get_condition(features, experiment_cfg.model.generator.condition_dim)
+            z = torch.zeros(real_sequences.size(0), experiment_cfg.model.generator.latent_dim, device=device)
+            reconstructed = generator(z, condition)
+            loss = criterion(reconstructed, real_sequences) * experiment_cfg.training.reconstruction_loss_weight
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item() * real_sequences.size(0)
+            total_samples += real_sequences.size(0)
+
+        avg_loss = total_loss / max(1, total_samples)
+        logger.info("Warm-up epoch %d | recon_loss=%.6f", epoch, avg_loss)
+        if run is not None:
+            run.log({"warmup/epoch": epoch, "warmup/reconstruction_loss": avg_loss})
+
+
 def _training_loop(
     experiment_cfg: GanExperimentConfig,
     generator: ConditionalGenerator,
@@ -159,6 +202,8 @@ def _training_loop(
     run,
     metrics_logger: Optional[CSVMetricLogger],
 ) -> Dict[str, Any]:
+    _reconstruction_warmup(experiment_cfg, generator, dataloader, device, run)
+
     g_optimizer = optim.Adam(
         generator.parameters(),
         lr=experiment_cfg.training.lr_generator,

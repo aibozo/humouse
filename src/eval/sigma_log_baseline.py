@@ -15,13 +15,17 @@ from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 
 from data.dataset import GestureDataset, GestureDatasetConfig
-from features import sigma_lognormal_features_from_sequence
+from features import sigma_lognormal_features_from_sequence, tensor_to_gesture
+from features.sigma_lognormal import decompose_sigma_lognormal, StrokeParams
 
 
 @dataclass
 class RealGestureStats:
     lengths: np.ndarray
     durations: np.ndarray
+    displacements: np.ndarray
+    sequences: List[np.ndarray]
+    templates: List[List[StrokeParams]]
 
 
 class FunctionBasedTrajectoryGenerator:
@@ -37,6 +41,9 @@ class FunctionBasedTrajectoryGenerator:
 
     def _sample_duration(self) -> float:
         return float(self.rng.choice(self.stats.durations))
+
+    def _sample_displacement(self) -> np.ndarray:
+        return self.stats.displacements[self.rng.integers(0, len(self.stats.displacements))]
 
     def _shape_points(self, u: np.ndarray, shape: str) -> np.ndarray:
         if shape == "linear":
@@ -81,9 +88,24 @@ class FunctionBasedTrajectoryGenerator:
         scale = target_length / max(current_len, 1e-6)
         points *= scale
 
-        theta = self.rng.uniform(-math.pi, math.pi)
-        rot = np.array([[math.cos(theta), -math.sin(theta)], [math.sin(theta), math.cos(theta)]])
-        points = points @ rot.T
+        displacement = self._sample_displacement()
+        vec_norm = np.linalg.norm(points[-1]) + 1e-9
+        target_vec = displacement
+        tgt_norm = np.linalg.norm(target_vec) + 1e-9
+        if vec_norm > 0 and tgt_norm > 0:
+            base_dir = points[-1] / vec_norm
+            target_dir = target_vec / tgt_norm
+            angle = math.atan2(target_dir[1], target_dir[0]) - math.atan2(base_dir[1], base_dir[0])
+            rot = np.array([[math.cos(angle), -math.sin(angle)], [math.sin(angle), math.cos(angle)]])
+            points = points @ rot.T
+            points *= tgt_norm / vec_norm
+
+        if self.rng.random() < 0.6:
+            tail_start = max(1, int(self.sequence_length * self.rng.uniform(0.6, 0.85)))
+            tail_count = points.shape[0] - (tail_start + 1)
+            if tail_count > 0:
+                correction = self.rng.normal(scale=target_length * 0.05, size=(tail_count, 2))
+                points[tail_start + 1 :] += correction
 
         dx_dy = np.diff(points, axis=0)
         duration = max(self._sample_duration(), 1e-3)
@@ -95,9 +117,111 @@ class FunctionBasedTrajectoryGenerator:
         return [self.generate_sequence(shape, velocity_profile) for _ in range(num_samples)]
 
 
+class SigmaLognormalTrajectoryGenerator:
+    """Generates trajectories by sampling Sigma-Lognormal stroke parameters."""
+
+    def __init__(self, stats: RealGestureStats, sequence_length: int = 64, seed: int | None = None):
+        self.stats = stats
+        self.sequence_length = sequence_length
+        self.rng = np.random.default_rng(seed)
+        self.templates = [tpl for tpl in stats.templates if tpl]
+        if not self.templates:
+            raise RuntimeError("No Sigma-Lognormal templates available for synthesis.")
+
+    def _jitter_stroke(self, stroke: StrokeParams) -> StrokeParams:
+        return StrokeParams(
+            distance=stroke.distance * float(self.rng.uniform(0.85, 1.15)),
+            t0=max(1e-3, stroke.t0 + float(self.rng.normal(0.0, max(0.01, 0.05 * stroke.t0)))),
+            mu=stroke.mu + float(self.rng.normal(0.0, 0.1)),
+            sigma=max(0.05, stroke.sigma + float(self.rng.normal(0.0, 0.05))),
+            theta_start=stroke.theta_start + float(self.rng.normal(0.0, 0.2)),
+            theta_end=stroke.theta_end + float(self.rng.normal(0.0, 0.2)),
+        )
+
+    def _stroke_velocity(self, stroke: StrokeParams, t: float) -> float:
+        tau = t - stroke.t0
+        if tau <= 1e-6:
+            return 0.0
+        sigma = max(0.05, stroke.sigma)
+        mu = stroke.mu
+        distance = max(1e-6, stroke.distance)
+        coeff = distance / (math.sqrt(2 * math.pi) * sigma * tau)
+        exponent = -0.5 * ((math.log(tau) - mu) / sigma) ** 2
+        return coeff * math.exp(exponent)
+
+    def _stroke_angle(self, stroke: StrokeParams, tau: float) -> float:
+        sigma = max(0.05, stroke.sigma)
+        logistics = 1.0 / (1.0 + math.exp(-(math.log(max(tau, 1e-6)) - stroke.mu) / (3.0 * sigma)))
+        return stroke.theta_start + (stroke.theta_end - stroke.theta_start) * logistics
+
+    def generate_sequence(self) -> np.ndarray:
+        template = self.templates[self.rng.integers(0, len(self.templates))]
+        strokes = [self._jitter_stroke(stroke) for stroke in template]
+        max_time = max(stroke.t0 + math.exp(stroke.mu + 2.0 * stroke.sigma) for stroke in strokes)
+        max_time = max_time * float(self.rng.uniform(0.9, 1.2))
+        times = np.linspace(1e-3, max_time, self.sequence_length + 1, dtype=np.float32)
+
+        points = np.zeros((self.sequence_length + 1, 2), dtype=np.float32)
+        for idx in range(self.sequence_length):
+            t0 = float(times[idx])
+            t1 = float(times[idx + 1])
+            dt = t1 - t0
+            if dt <= 0:
+                continue
+            t_mid = 0.5 * (t0 + t1)
+            vx = 0.0
+            vy = 0.0
+            for stroke in strokes:
+                tau = t_mid - stroke.t0
+                if tau <= 1e-6:
+                    continue
+                speed = self._stroke_velocity(stroke, t_mid)
+                if speed <= 0:
+                    continue
+                angle = self._stroke_angle(stroke, tau)
+                vx += speed * math.cos(angle)
+                vy += speed * math.sin(angle)
+            points[idx + 1, 0] = points[idx, 0] + vx * dt
+            points[idx + 1, 1] = points[idx, 1] + vy * dt
+
+        dx = np.diff(points[:, 0])
+        dy = np.diff(points[:, 1])
+        traj_length = np.sum(np.sqrt(dx**2 + dy**2)) + 1e-9
+        target_length = float(self.rng.choice(self.stats.lengths))
+        dx *= target_length / traj_length
+        dy *= target_length / traj_length
+
+        duration = float(self.rng.choice(self.stats.durations))
+        dt = np.diff(times)
+        dt = np.clip(dt, 1e-4, None)
+        dt = dt / dt.sum() * duration
+
+        noise_scale = target_length * 0.02
+        dx += self.rng.normal(scale=noise_scale, size=dx.shape)
+        dy += self.rng.normal(scale=noise_scale, size=dy.shape)
+
+        sequence = np.stack([dx.astype(np.float32), dy.astype(np.float32), dt.astype(np.float32)], axis=1)
+        return sequence
+
+    def generate_batch(self, num_samples: int) -> List[np.ndarray]:
+        samples: List[np.ndarray] = []
+        for _ in range(num_samples):
+            try:
+                samples.append(self.generate_sequence())
+            except Exception:
+                continue
+        if not samples:
+            raise RuntimeError("SigmaLognormalTrajectoryGenerator failed to generate samples")
+        return samples
+
+
 def _collect_real_stats(dataset: GestureDataset) -> RealGestureStats:
     lengths: List[float] = []
     durations: List[float] = []
+    displacements: List[np.ndarray] = []
+    sequences: List[np.ndarray] = []
+    templates: List[List[StrokeParams]] = []
+
     for sequence, _, label in dataset.samples:
         if label.item() != 1.0:
             continue
@@ -107,7 +231,20 @@ def _collect_real_stats(dataset: GestureDataset) -> RealGestureStats:
         dt = seq_np[:, 2]
         lengths.append(float(np.sum(np.sqrt(dx**2 + dy**2))))
         durations.append(float(np.sum(dt)))
-    return RealGestureStats(lengths=np.array(lengths), durations=np.array(durations))
+        displacements.append(np.array([np.sum(dx), np.sum(dy)], dtype=np.float32))
+        sequences.append(seq_np)
+        gesture = tensor_to_gesture(sequence)
+        strokes = decompose_sigma_lognormal(gesture)
+        if strokes:
+            templates.append(strokes)
+
+    return RealGestureStats(
+        lengths=np.array(lengths),
+        durations=np.array(durations),
+        displacements=np.stack(displacements),
+        sequences=sequences,
+        templates=templates,
+    )
 
 
 def _features_from_sequences(sequences: Iterable[np.ndarray]) -> np.ndarray:
@@ -143,6 +280,7 @@ def run_baseline(
     max_gestures: int,
     seed: int,
     samples_per_case: int,
+    generator_type: str = "function",
     output: Path | None = None,
 ) -> dict:
     dataset_cfg = GestureDatasetConfig(
@@ -157,32 +295,53 @@ def run_baseline(
     )
     dataset = GestureDataset(dataset_cfg)
     stats = _collect_real_stats(dataset)
-    generator = FunctionBasedTrajectoryGenerator(stats, sequence_length=sequence_length, seed=seed)
 
+    
     real_features = dataset.get_positive_features_tensor().numpy()
 
-    shapes = ["linear", "quadratic", "exponential"]
-    velocities = ["constant", "logarithmic", "gaussian"]
     results = []
-    for shape in shapes:
-        for velocity in velocities:
-            synthetic_sequences = generator.generate_batch(samples_per_case, shape, velocity)
+    if generator_type == "function":
+        generator = FunctionBasedTrajectoryGenerator(stats, sequence_length=sequence_length, seed=seed)
+        shapes = ["linear", "quadratic", "exponential"]
+        velocities = ["constant", "logarithmic", "gaussian"]
+        for shape in shapes:
+            for velocity in velocities:
+                synthetic_sequences = generator.generate_batch(samples_per_case, shape, velocity)
+                synthetic_features = _features_from_sequences(synthetic_sequences)
+                acc, extras = _train_classifier(real_features, synthetic_features, seed=seed)
+                results.append(
+                    {
+                        "shape": shape,
+                        "velocity": velocity,
+                        "accuracy": acc,
+                        "error_rate": 1.0 - acc,
+                        "details": extras,
+                    }
+                )
+    elif generator_type == "sigma":
+        generator = SigmaLognormalTrajectoryGenerator(stats, sequence_length=sequence_length, seed=seed)
+        replicates = 5
+        for idx in range(replicates):
+            synthetic_sequences = generator.generate_batch(samples_per_case)
             synthetic_features = _features_from_sequences(synthetic_sequences)
-            acc, extras = _train_classifier(real_features, synthetic_features, seed=seed)
+            acc, extras = _train_classifier(real_features, synthetic_features, seed=seed + idx)
             results.append(
                 {
-                    "shape": shape,
-                    "velocity": velocity,
+                    "shape": "sigma_lognormal",
+                    "velocity": f"replicate_{idx}",
                     "accuracy": acc,
                     "error_rate": 1.0 - acc,
                     "details": extras,
                 }
             )
+    else:
+        raise ValueError(f"Unsupported generator type: {generator_type}")
 
     summary = {
         "dataset_id": dataset_id,
         "sequence_length": sequence_length,
         "samples_per_case": samples_per_case,
+        "generator": generator_type,
         "results": results,
         "average_accuracy": float(np.mean([item["accuracy"] for item in results])),
     }
@@ -200,6 +359,12 @@ def main() -> None:
     parser.add_argument("--max-gestures", type=int, default=4096, help="Maximum real gestures to load")
     parser.add_argument("--samples", type=int, default=2000, help="Synthetic samples per shape/velocity case")
     parser.add_argument("--seed", type=int, default=1337, help="Random seed")
+    parser.add_argument(
+        "--generator",
+        choices=["function", "sigma"],
+        default="function",
+        help="Synthetic trajectory generator type",
+    )
     parser.add_argument("--output", type=Path, default=None, help="Optional JSON output path")
     args = parser.parse_args()
 
@@ -209,12 +374,13 @@ def main() -> None:
         max_gestures=args.max_gestures,
         seed=args.seed,
         samples_per_case=args.samples,
+        generator_type=args.generator,
         output=args.output,
     )
     for item in summary["results"]:
         print(
-            f"shape={item['shape']:<10} velocity={item['velocity']:<12} accuracy={item['accuracy']*100:6.2f}%"
-            f"  error={item['error_rate']*100:5.2f}%"
+            f"[{summary['generator']}] shape={item['shape']:<15} velocity={item['velocity']:<12}"
+            f" accuracy={item['accuracy']*100:6.2f}%  error={item['error_rate']*100:5.2f}%"
         )
     print(f"Average accuracy: {summary['average_accuracy']*100:.2f}% | Error: {(1.0-summary['average_accuracy'])*100:.2f}%")
 

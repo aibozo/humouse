@@ -29,6 +29,9 @@ class DataConfig:
     normalize_sequences: bool = True
     normalize_features: bool = True
     feature_mode: str = "neuromotor"
+    canonicalize_path: bool = False
+    canonicalize_duration: bool = False
+    sampling_rate: Optional[float] = None
 
 
 @dataclass
@@ -52,6 +55,14 @@ class GanTrainingConfig:
     reconstruction_epochs: int = 0
     reconstruction_loss_weight: float = 1.0
     adversarial_type: str = "wgan"
+    sigma_eval_enabled: bool = False
+    sigma_eval_interval: int = 1
+    sigma_eval_samples: int = 512
+    sigma_eval_dataset_id: Optional[str] = None
+    sigma_eval_max_gestures: int = 4096
+    absolute_coordinates: bool = False
+    generator_init_path: Optional[str] = None
+    jerk_match_weight: float = 0.0
 
 
 @dataclass

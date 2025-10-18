@@ -1,0 +1,74 @@
+experiment_name: train_gan_paper
+seed: 2021
+
+data:
+  dataset_id: balabit
+  sequence_length: 200
+  sampling_rate: 200.0
+  batch_size: 128
+  num_workers: 4
+  max_gestures: 4096
+  cache_enabled: true
+  cache_dir: data/processed
+  feature_mode: sigma_lognormal
+  normalize_sequences: false
+  normalize_features: false
+  canonicalize_path: false
+  canonicalize_duration: false
+
+model:
+  architecture: lstm
+  generator:
+    latent_dim: 100
+    condition_dim: 0
+    hidden_dim: 128
+    target_len: 200
+    num_layers: 2
+    use_spectral_norm: false
+    output_dim: 2
+    activation_xy: linear
+    activation_dt: none
+  discriminator:
+    input_dim: 2
+    condition_dim: 0
+    hidden_dim: 128
+    num_layers: 2
+    use_spectral_norm: false
+
+training:
+  epochs: 50
+  lr:
+    generator: 0.0002
+    discriminator: 0.0001
+  betas: [0.5, 0.999]
+  gradient_penalty_weight: 0.0
+  discriminator_steps: 1
+  log_interval: 100
+  sample_interval: 50
+  replay_buffer_path: checkpoints/gan_paper/replay_buffer.pt
+  replay_samples_per_epoch: 0
+  replay_buffer_max_size: 0
+  co_train_detector: false
+  detector_update_every: 0
+  detector_config_path: null
+  detector_epochs_per_update: 0
+  reconstruction_epochs: 0
+  reconstruction_loss_weight: 0.0
+  adversarial_type: vanilla
+  sigma_eval_enabled: true
+  sigma_eval_interval: 1
+  sigma_eval_samples: 512
+  sigma_eval_dataset_id: null
+  sigma_eval_max_gestures: 4096
+  absolute_coordinates: true
+  generator_init_path: checkpoints/pretrain/balabit_lstm.pt
+  jerk_match_weight: 0.001
+
+logging:
+  target: wandb
+  project: mouse-gan
+  entity: null
+  mode: offline
+  log_interval: 100
+  checkpoint_dir: checkpoints/gan_paper
+  tags: [paper, becaptcha, lstm]

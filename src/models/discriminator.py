@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import torch
 from torch import nn
+from torch.nn.utils import spectral_norm
 
 from .components import ResidualTCN, mlp
 

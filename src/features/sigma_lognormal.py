@@ -96,32 +96,44 @@ def decompose_sigma_lognormal(
     return strokes
 
 
-def _half_stats(values: Sequence[float]) -> List[float]:
+def _stats(values: Sequence[float]) -> List[float]:
     if not values:
-        return [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    midpoint = max(1, len(values) // 2)
-    first = np.array(values[:midpoint], dtype=np.float32)
-    second = np.array(values[midpoint:], dtype=np.float32)
-    if second.size == 0:
-        second = first
-    stats = [float(np.max(first)), float(np.min(first)), float(np.mean(first))]
-    stats.extend([float(np.max(second)), float(np.min(second)), float(np.mean(second))])
-    return stats
+        return [0.0, 0.0, 0.0]
+    arr = np.asarray(values, dtype=np.float32)
+    return [float(np.max(arr)), float(np.min(arr)), float(np.mean(arr))]
+
+
+def _split_strokes_by_time(strokes: Sequence[StrokeParams], half_time: float) -> tuple[list[StrokeParams], list[StrokeParams]]:
+    if not strokes:
+        return [], []
+    first: list[StrokeParams] = []
+    second: list[StrokeParams] = []
+    for stroke in strokes:
+        # t0 approximates stroke onset; use it to determine the active half.
+        target = first if stroke.t0 <= half_time else second
+        target.append(stroke)
+    if not first and second:
+        first = list(second)
+    if not second and first:
+        second = list(first)
+    return first, second
 
 
 def sigma_lognormal_features(gesture: GestureSequence) -> np.ndarray:
     """Return the 37-dimensional Sigma-Lognormal feature vector."""
     strokes = decompose_sigma_lognormal(gesture)
-    distances = [s.distance for s in strokes]
-    t0s = [s.t0 for s in strokes]
-    mus = [s.mu for s in strokes]
-    sigmas = [s.sigma for s in strokes]
-    theta_start = [s.theta_start for s in strokes]
-    theta_end = [s.theta_end for s in strokes]
+    duration = max(float(gesture.duration), 1e-6)
+    half_time = 0.5 * duration
+
+    first_half, second_half = _split_strokes_by_time(strokes, half_time)
 
     feature_vec: List[float] = []
-    for values in (distances, t0s, mus, sigmas, theta_start, theta_end):
-        feature_vec.extend(_half_stats(values))
+    for attr in ("distance", "t0", "mu", "sigma", "theta_start", "theta_end"):
+        first_values = [getattr(stroke, attr) for stroke in first_half]
+        second_values = [getattr(stroke, attr) for stroke in second_half]
+        feature_vec.extend(_stats(first_values))
+        feature_vec.extend(_stats(second_values))
+
     feature_vec.append(float(len(strokes)))
     return np.array(feature_vec, dtype=np.float32)
 

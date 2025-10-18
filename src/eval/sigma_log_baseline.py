@@ -32,9 +32,16 @@ class RealGestureStats:
 class FunctionBasedTrajectoryGenerator:
     """Replicates BeCAPTCHA function-driven synthetic trajectories."""
 
-    def __init__(self, stats: RealGestureStats, sequence_length: int = 64, seed: int | None = None):
+    def __init__(
+        self,
+        stats: RealGestureStats,
+        sequence_length: int | None = 64,
+        seed: int | None = None,
+        sampling_rate: float | None = 200.0,
+    ):
         self.stats = stats
-        self.sequence_length = sequence_length
+        self.sequence_length = sequence_length if sequence_length and sequence_length > 0 else None
+        self.sampling_rate = sampling_rate if sampling_rate is not None else 200.0
         self.rng = np.random.default_rng(seed)
 
     def _sample_length(self) -> float:
@@ -64,8 +71,7 @@ class FunctionBasedTrajectoryGenerator:
         points -= points[0]
         return points
 
-    def _velocity_weights(self, profile: str) -> np.ndarray:
-        n = self.sequence_length
+    def _velocity_weights(self, profile: str, n: int) -> np.ndarray:
         if profile == "constant":
             weights = np.ones(n, dtype=np.float32)
         elif profile == "logarithmic":
@@ -78,7 +84,12 @@ class FunctionBasedTrajectoryGenerator:
         return weights.astype(np.float32)
 
     def generate_sequence(self, shape: str, velocity_profile: str) -> np.ndarray:
-        weights = self._velocity_weights(velocity_profile)
+        duration = max(self._sample_duration(), 1e-3)
+        if self.sequence_length is not None:
+            n = self.sequence_length
+        else:
+            n = max(16, int(round(duration * self.sampling_rate)))
+        weights = self._velocity_weights(velocity_profile, n)
         cumulative = np.concatenate([[0.0], np.cumsum(weights)])
         cumulative /= cumulative[-1]
 
@@ -102,14 +113,14 @@ class FunctionBasedTrajectoryGenerator:
             points *= tgt_norm / vec_norm
 
         if self.rng.random() < 0.6:
-            tail_start = max(1, int(self.sequence_length * self.rng.uniform(0.6, 0.85)))
+            base_len = n
+            tail_start = max(1, int(base_len * self.rng.uniform(0.6, 0.85)))
             tail_count = points.shape[0] - (tail_start + 1)
             if tail_count > 0:
                 correction = self.rng.normal(scale=target_length * 0.05, size=(tail_count, 2))
                 points[tail_start + 1 :] += correction
 
         dx_dy = np.diff(points, axis=0)
-        duration = max(self._sample_duration(), 1e-3)
         dt = weights / weights.sum() * duration
         sequence = np.stack([dx_dy[:, 0], dx_dy[:, 1], dt], axis=1)
         return sequence.astype(np.float32)
@@ -121,9 +132,16 @@ class FunctionBasedTrajectoryGenerator:
 class SigmaLognormalTrajectoryGenerator:
     """Generates trajectories by sampling Sigma-Lognormal stroke parameters."""
 
-    def __init__(self, stats: RealGestureStats, sequence_length: int = 64, seed: int | None = None):
+    def __init__(
+        self,
+        stats: RealGestureStats,
+        sequence_length: int | None = 64,
+        seed: int | None = None,
+        sampling_rate: float | None = 200.0,
+    ):
         self.stats = stats
-        self.sequence_length = sequence_length
+        self.sequence_length = sequence_length if sequence_length and sequence_length > 0 else None
+        self.sampling_rate = sampling_rate if sampling_rate is not None else 200.0
         self.rng = np.random.default_rng(seed)
         self.templates = [tpl for tpl in stats.templates if tpl]
         if not self.templates:
@@ -169,10 +187,16 @@ class SigmaLognormalTrajectoryGenerator:
         strokes = [self._jitter_stroke(stroke) for stroke in template]
         max_time = max(stroke.t0 + math.exp(stroke.mu + 2.0 * stroke.sigma) for stroke in strokes)
         max_time = max_time * float(self.rng.uniform(0.9, 1.2))
-        times = np.linspace(1e-3, max_time, self.sequence_length + 1, dtype=np.float32)
+        duration = float(self.rng.choice(self.stats.durations)) * float(self.rng.uniform(0.9, 1.1))
+        if self.sequence_length is not None:
+            n = self.sequence_length
+        else:
+            n = max(32, int(round(duration * self.sampling_rate)))
 
-        points = np.zeros((self.sequence_length + 1, 2), dtype=np.float32)
-        for idx in range(self.sequence_length):
+        times = np.linspace(1e-3, max_time, n + 1, dtype=np.float32)
+
+        points = np.zeros((n + 1, 2), dtype=np.float32)
+        for idx in range(n):
             t0 = float(times[idx])
             t1 = float(times[idx + 1])
             dt = t1 - t0
@@ -308,6 +332,9 @@ def run_baseline(
     generator_type: str = "function",
     gan_dir: Path | None = None,
     output: Path | None = None,
+    canonicalize_path: bool = True,
+    canonicalize_duration: bool = True,
+    sampling_rate: float | None = 200.0,
 ) -> dict:
     dataset_cfg = GestureDatasetConfig(
         dataset_id=dataset_id,
@@ -318,6 +345,8 @@ def run_baseline(
         normalize_sequences=False,
         normalize_features=False,
         feature_mode="sigma_lognormal",
+        canonicalize_path=canonicalize_path,
+        canonicalize_duration=canonicalize_duration,
     )
     dataset = GestureDataset(dataset_cfg)
     stats = _collect_real_stats(dataset)
@@ -326,8 +355,15 @@ def run_baseline(
     real_features = dataset.get_positive_features_tensor().numpy()
 
     results = []
+    sampling_rate = sampling_rate if sampling_rate is not None else 200.0
+
     if generator_type == "function":
-        generator = FunctionBasedTrajectoryGenerator(stats, sequence_length=sequence_length, seed=seed)
+        generator = FunctionBasedTrajectoryGenerator(
+            stats,
+            sequence_length=sequence_length,
+            seed=seed,
+            sampling_rate=sampling_rate,
+        )
         shapes = ["linear", "quadratic", "exponential"]
         velocities = ["constant", "logarithmic", "gaussian"]
         for shape in shapes:
@@ -345,7 +381,12 @@ def run_baseline(
                     }
                 )
     elif generator_type == "sigma":
-        generator = SigmaLognormalTrajectoryGenerator(stats, sequence_length=sequence_length, seed=seed)
+        generator = SigmaLognormalTrajectoryGenerator(
+            stats,
+            sequence_length=sequence_length,
+            seed=seed,
+            sampling_rate=sampling_rate,
+        )
         replicates = 5
         for idx in range(replicates):
             synthetic_sequences = generator.generate_batch(samples_per_case)
@@ -393,6 +434,7 @@ def run_baseline(
     summary = {
         "dataset_id": dataset_id,
         "sequence_length": sequence_length,
+        "sampling_rate": sampling_rate,
         "samples_per_case": samples_per_case,
         "generator": generator_type,
         "results": results,
@@ -412,6 +454,7 @@ def main() -> None:
     parser.add_argument("--max-gestures", type=int, default=4096, help="Maximum real gestures to load")
     parser.add_argument("--samples", type=int, default=2000, help="Synthetic samples per shape/velocity case")
     parser.add_argument("--seed", type=int, default=1337, help="Random seed")
+    parser.add_argument("--sampling-rate", type=float, default=200.0, help="Sampling rate (Hz) for synthetic generators when dynamic length is enabled")
     parser.add_argument(
         "--generator",
         choices=["function", "sigma", "gan"],
@@ -420,6 +463,19 @@ def main() -> None:
     )
     parser.add_argument("--gan-dir", type=Path, default=None, help="Directory containing GAN sample NPZ files")
     parser.add_argument("--output", type=Path, default=None, help="Optional JSON output path")
+    parser.add_argument(
+        "--no-canon-path",
+        action="store_false",
+        dest="canon_path",
+        help="Disable unit-path-length canonicalisation for real gestures",
+    )
+    parser.add_argument(
+        "--no-canon-duration",
+        action="store_false",
+        dest="canon_duration",
+        help="Disable unit-duration canonicalisation for real gestures",
+    )
+    parser.set_defaults(canon_path=True, canon_duration=True)
     args = parser.parse_args()
 
     summary = run_baseline(
@@ -431,6 +487,9 @@ def main() -> None:
         generator_type=args.generator,
         gan_dir=args.gan_dir,
         output=args.output,
+        canonicalize_path=args.canon_path,
+        canonicalize_duration=args.canon_duration,
+        sampling_rate=args.sampling_rate,
     )
     for item in summary["results"]:
         print(

@@ -9,32 +9,36 @@ data:
   max_gestures: 4096
   cache_enabled: true
   cache_dir: data/processed
-  feature_mode: neuromotor
+  feature_mode: sigma_lognormal
+  normalize_sequences: false
+  normalize_features: true
+  canonicalize_path: true
+  canonicalize_duration: true
 
 model:
   architecture: tcn
   generator:
     latent_dim: 64
-    condition_dim: 15
+    condition_dim: 37
     hidden_dim: 128
     target_len: 64
     num_layers: 3
     use_spectral_norm: false
   discriminator:
     input_dim: 3
-    condition_dim: 15
+    condition_dim: 37
     hidden_dim: 128
     num_layers: 4
-    use_spectral_norm: false
+    use_spectral_norm: true
 
 training:
   epochs: 50
   lr:
-    generator: 0.0001
-    discriminator: 0.0004
-  betas: [0.5, 0.9]
+    generator: 0.00005
+    discriminator: 0.0001
+  betas: [0.5, 0.999]
   gradient_penalty_weight: 10.0
-  discriminator_steps: 5
+  discriminator_steps: 1
   log_interval: 50
   sample_interval: 200
   replay_buffer_path: checkpoints/gan/replay_buffer.pt
@@ -44,9 +48,14 @@ training:
   detector_update_every: 5
   detector_config_path: conf/experiment/train_detector.yaml
   detector_epochs_per_update: 1
-  reconstruction_epochs: 0
-  reconstruction_loss_weight: 1.0
-  adversarial_type: wgan
+  reconstruction_epochs: 5
+  reconstruction_loss_weight: 0.001
+  adversarial_type: vanilla
+  sigma_eval_enabled: true
+  sigma_eval_interval: 1
+  sigma_eval_samples: 512
+  sigma_eval_dataset_id: null
+  sigma_eval_max_gestures: 4096
 
 logging:
   target: wandb

@@ -46,3 +46,7 @@ Store raw downloads under `data/raw/<dataset>` and processed gesture tensors und
 ## Ethical Note
 This project is intended for benign research and red-teaming. Respect dataset licences, user privacy, and platform terms of service; do not deploy adversarial traces for malicious evasion.
 
+## Experiment Entry Points
+- `src/train/train_gan.py` — Hydra entry for GAN experiments. Use `experiment=train_gan_baseline` for the conditional TCN/WGAN loop, or `experiment=train_gan_paper` to reproduce the BeCAPTCHA-style LSTM GAN with vanilla BCE training.
+- `experiment=train_gan_paper` now resamples raw events at 200 Hz (`data.sampling_rate=200`) and enables `training.absolute_coordinates=true`, so the generator predicts absolute `{x, y}` paths while the discriminator operates on the same coordinates.
+- `src/train/train_detector.py` — Hydra entry for detector training (`experiment=train_detector.yaml` or dataset-specific overrides).

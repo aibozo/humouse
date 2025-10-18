@@ -26,10 +26,17 @@ Implemented in `src/features/neuromotor.py` with smoothing via Savitzky–Golay 
 
 Contributions welcome—extend `FEATURE_SPECS` and add unit tests.
 
+## Sigma-Lognormal Feature Vector (BeCAPTCHA-Mouse)
+- Each gesture is decomposed into lognormal strokes as described in [Plamondon 1995](https://doi.org/10.1007/BF00201464) and Appendix B of BeCAPTCHA-Mouse (Table 2).
+- For every stroke we retain the six core parameters: path distance, onset time `t₀`, lognormal location `μ`, lognormal spread `σ`, initial angle, and final angle.
+- Gestures are split at half the total duration. For each parameter we record the maximum, minimum, and mean over the first half and repeat for the second half (6 statistics × 6 parameters = 36 values).
+- The final feature appends the stroke count `N`, yielding the 37-dimensional vector the paper reports.
+- Implemented in `src/features/sigma_lognormal.py` via `_split_strokes_by_time` and `_stats`; make sure gestures are analysed in raw pixel/time space before any unit-path or unit-duration canonicalisation when reproducing BeCAPTCHA experiments.
+- The paper-faithful pipeline resamples raw events to a fixed 200 Hz grid (`data.sampling_rate=200`) before feature extraction so Δt is constant (5 ms) across real and generated gestures.
+
 ## Implementation Notes
 - Input `GestureSequence` expected from `src/data/segmenter.py` (resampled sequences with mask).
 - Finite differences use safe denominators (`dt` clamped at 1e-6).
 - Smoothing automatically adjusts window length for short gestures.
 - Direction change count currently sums sign flips on Δx and Δy; refine if using polar direction bins.
 - Feature vectors returned as `float32`; batch helper `compute_feature_matrix` stacks vectors for detector training.
-

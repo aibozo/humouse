@@ -6,6 +6,16 @@ Use this document to track actionable items, progress, and open questions. Updat
 - Flesh out GAN training loop with replay buffer and detector co-training.
 - Persist processed gesture datasets to disk (parquet/npz) for faster reloads.
 - Expand neuromotor feature set (spectral metrics, Fitts residuals) and update models/tests accordingly.
+- Evaluate replay features vs real distribution (plots + Sigma-Lognormal histograms).
+- Schedule longer steady-state GAN training runs with BeCAPTCHA hyperparameters and logging.
+- Add inline GAN evaluation hook invoking sigma_log_baseline during training and logging to W&B.
+- Plan hyperparameter sweeps (TTUR vs symmetric LR, supervised reconstruction weight) aligned with BeCAPTCHA study.
+- Run sanity-check training cycles with `experiment=train_gan_paper` (≥10 epochs) and compare sigma error against function/sigma baselines.
+- Reconcile dataset resampling with 200 Hz requirement (variable-length sequences or dedicated loader profile).
+- Warm-start GAN on Δx/Δy (fixed Δt=1/200) and ensure generator head matches delta statistics.
+- Add goal-geometry conditioning (`cosθ`, `sinθ`, distance, target width/style) to generator input.
+- Replace jerk penalty with curvature/lateral deviation losses in canonical frame; optionally add high-frequency band penalty.
+- Track theta_start/path-efficiency/jerk metrics post-change to confirm jitter matches real data.
 
 ## In Progress
 - *(empty — update when work begins)*
@@ -15,6 +25,9 @@ Use this document to track actionable items, progress, and open questions. Updat
 
 ## Done / Notes
 - 2025-10-16: Added Sigma-Lognormal baseline evaluator (`src/eval/sigma_log_baseline.py`) generating function-based synthetic trajectories and RandomForest metrics per shape/velocity profile.
+- 2025-10-17: Added replay vs real plotting utility (`scripts/plot_replay_vs_real.py`); canonicalised gesture preprocessing (unit path/time) with sigma-feature GAN training and inline evaluation updates (`conf/experiment/train_gan.yaml`, `src/data/dataset.py`, `src/train/train_gan.py`).
+- 2025-10-17: Reconciled Sigma-Lognormal feature vector with BeCAPTCHA spec and refreshed baseline generators; introduced paper-aligned LSTM/BCE GAN config (`conf/experiment/train_gan_paper.yaml`) and documentation updates.
+- 2025-10-17: Added fixed-rate (200 Hz) resampling path in `GestureDataset` plus absolute-coordinate GAN training option; paper config now emits `{x, y}` positions with linear heads and converts back to deltas for metrics/exports.
 - 2025-02-14: Created `.venv` (Python 3.12) and installed dependencies from `requirements.txt`; generated `requirements.lock` for reproducibility.
 - 2025-02-14: Inventoried local datasets and documented schema/integration notes in `docs/data_inventory.md`, including citations for all datasets.
 - 2025-02-14: Added dataset registry and validation utilities (`src/data/registry.py`, `src/data/loaders.py`) with pytest coverage (`tests/test_dataset_registry.py`).

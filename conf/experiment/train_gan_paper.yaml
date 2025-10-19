@@ -2,9 +2,9 @@ experiment_name: train_gan_paper
 seed: 2021
 
 data:
-  dataset_id: balabit
+  dataset_id: bogazici
   sequence_length: 200
-  sampling_rate: 200.0
+  sampling_rate: 100.0
   batch_size: 128
   num_workers: 4
   max_gestures: 4096
@@ -52,8 +52,8 @@ training:
   detector_update_every: 0
   detector_config_path: null
   detector_epochs_per_update: 0
-  reconstruction_epochs: 0
-  reconstruction_loss_weight: 0.0
+  reconstruction_epochs: 5
+  reconstruction_loss_weight: 1.0
   adversarial_type: vanilla
   sigma_eval_enabled: true
   sigma_eval_interval: 1
@@ -61,8 +61,10 @@ training:
   sigma_eval_dataset_id: null
   sigma_eval_max_gestures: 4096
   absolute_coordinates: true
-  generator_init_path: checkpoints/pretrain/balabit_lstm.pt
-  jerk_match_weight: 0.001
+  generator_init_path: null
+  curvature_match_weight: 0.0
+  lateral_match_weight: 0.0
+  direction_match_weight: 0.0
 
 logging:
   target: wandb

@@ -2,31 +2,34 @@ experiment_name: train_gan_baseline
 seed: 1337
 
 data:
-  dataset_id: balabit
-  sequence_length: 64
+  dataset_id: bogazici
+  sequence_length: 200
   batch_size: 64
   num_workers: 4
   max_gestures: 4096
+  sampling_rate: 100.0
   cache_enabled: true
   cache_dir: data/processed
   feature_mode: sigma_lognormal
-  normalize_sequences: false
+  normalize_sequences: true
   normalize_features: true
-  canonicalize_path: true
-  canonicalize_duration: true
+  canonicalize_path: false
+  canonicalize_duration: false
+  include_goal_geometry: true
 
 model:
   architecture: tcn
   generator:
     latent_dim: 64
-    condition_dim: 37
+    condition_dim: 42
     hidden_dim: 128
-    target_len: 64
+    target_len: 200
     num_layers: 3
     use_spectral_norm: false
+    activation_xy: linear
   discriminator:
     input_dim: 3
-    condition_dim: 37
+    condition_dim: 42
     hidden_dim: 128
     num_layers: 4
     use_spectral_norm: true
@@ -56,6 +59,9 @@ training:
   sigma_eval_samples: 512
   sigma_eval_dataset_id: null
   sigma_eval_max_gestures: 4096
+  curvature_match_weight: 0.05
+  lateral_match_weight: 0.1
+  direction_match_weight: 5.0
 
 logging:
   target: wandb

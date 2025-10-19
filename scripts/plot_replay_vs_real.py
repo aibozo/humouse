@@ -3,11 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import math
 from pathlib import Path
-from typing import Iterable, Sequence
-
-import json
 
 import numpy as np
 
@@ -15,25 +11,9 @@ import matplotlib
 
 
 matplotlib.use("Agg")  # render without display
-import matplotlib.pyplot as plt
-import torch
 
 from data.dataset import GestureDataset, GestureDatasetConfig
-from features import sigma_lognormal_features_from_sequence
-
-
-def _build_feature_names() -> list[str]:
-    stats = ["first_max", "first_min", "first_mean", "second_max", "second_min", "second_mean"]
-    groups = ["distance", "t0", "mu", "sigma", "theta_start", "theta_end"]
-    names: list[str] = []
-    for group in groups:
-        for stat in stats:
-            names.append(f"{group}_{stat}")
-    names.append("stroke_count")
-    return names
-
-
-FEATURE_NAMES = _build_feature_names()
+from utils.plotting import generate_replay_vs_real_plots
 
 
 def _load_real_data(
@@ -208,7 +188,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    rng = np.random.default_rng(args.seed)
 
     real_sequences, real_features = _load_real_data(
         dataset_id=args.dataset,
@@ -217,39 +196,17 @@ def main() -> None:
         canonicalize_path=args.canon_path,
         canonicalize_duration=args.canon_duration,
     )
-    replay_sequences = _load_replay_sequences(args.replay_dir, args.sequence_length)
-
-    plot_real_idx = _sample_indices(rng, len(real_sequences), args.plot_count)
-    plot_replay_idx = _sample_indices(rng, len(replay_sequences), args.plot_count)
-    real_plot_samples = real_sequences[plot_real_idx]
-    replay_plot_samples = replay_sequences[plot_replay_idx]
-
-    feature_sample_count = args.feature_samples if args.feature_samples > 0 else len(real_sequences)
-    real_feat_idx = _sample_indices(rng, len(real_sequences), feature_sample_count)
-    replay_feat_idx = _sample_indices(rng, len(replay_sequences), feature_sample_count)
-
-    replay_feature_samples = _compute_sigma_features(replay_sequences[replay_feat_idx])
-    real_feature_samples = real_features[real_feat_idx]
-
-    output_dir = args.output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    sequence_plot_path = output_dir / "trajectory_samples.png"
-    feature_hist_path = output_dir / "sigma_feature_histograms.png"
-
-    _plot_sequence_grid(sequence_plot_path, real_plot_samples, replay_plot_samples)
-    _plot_feature_histograms(feature_hist_path, real_feature_samples, replay_feature_samples, args.bins)
-
-    summary = {
-        "real_sequence_count": int(len(real_sequences)),
-        "replay_sequence_count": int(len(replay_sequences)),
-        "feature_dimension": int(real_features.shape[1]),
-        "feature_hist_samples": int(feature_sample_count),
-        "sequence_plot_samples": int(args.plot_count),
-        "sequence_plot_path": str(sequence_plot_path),
-        "feature_hist_path": str(feature_hist_path),
-    }
-    (output_dir / "histogram_summary.json").write_text(json.dumps(summary, indent=2))
+    generate_replay_vs_real_plots(
+        real_sequences,
+        real_features,
+        args.replay_dir,
+        args.output_dir,
+        seed=args.seed,
+        plot_count=args.plot_count,
+        feature_samples=args.feature_samples if args.feature_samples > 0 else len(real_sequences),
+        bins=args.bins,
+        sequence_length=args.sequence_length,
+    )
 
 
 if __name__ == "__main__":

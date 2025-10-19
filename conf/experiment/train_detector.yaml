@@ -2,12 +2,13 @@ experiment_name: train_detector_baseline
 seed: 1337
 
 data:
-  dataset_id: balabit
-  sequence_length: 64
+  dataset_id: bogazici
+  sequence_length: 200
   batch_size: 128
   num_workers: 4
   use_generated_negatives: true
   max_gestures: 4096
+  sampling_rate: 100.0
   cache_enabled: true
   cache_dir: data/processed
   replay_path: checkpoints/gan/replay_buffer.pt

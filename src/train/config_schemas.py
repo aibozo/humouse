@@ -32,6 +32,7 @@ class DataConfig:
     canonicalize_path: bool = False
     canonicalize_duration: bool = False
     sampling_rate: Optional[float] = None
+    include_goal_geometry: bool = False
 
 
 @dataclass
@@ -62,7 +63,14 @@ class GanTrainingConfig:
     sigma_eval_max_gestures: int = 4096
     absolute_coordinates: bool = False
     generator_init_path: Optional[str] = None
-    jerk_match_weight: float = 0.0
+    curvature_match_weight: float = 0.0
+    lateral_match_weight: float = 0.0
+    direction_match_weight: float = 0.0
+    warmup_encoder_hidden_dim: int = 128
+    warmup_encoder_layers: int = 1
+    warmup_encoder_dropout: float = 0.0
+    warmup_noise_std: float = 0.0
+    warmup_latent_normalize: bool = True
 
 
 @dataclass

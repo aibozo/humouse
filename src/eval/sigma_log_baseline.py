@@ -347,6 +347,7 @@ def run_baseline(
         feature_mode="sigma_lognormal",
         canonicalize_path=canonicalize_path,
         canonicalize_duration=canonicalize_duration,
+        sampling_rate=sampling_rate,
     )
     dataset = GestureDataset(dataset_cfg)
     stats = _collect_real_stats(dataset)
@@ -409,14 +410,18 @@ def run_baseline(
             raise RuntimeError(f"No .npz sequences found under {gan_dir}")
         rng = np.random.default_rng(seed)
         for file_path in files:
-            data = np.load(file_path)
-            sequences = data.get("sequences")
-            if sequences is None:
-                continue
-            if sequences.ndim == 2:
-                sequences = sequences[None, ...]
-            idxs = rng.choice(sequences.shape[0], size=min(samples_per_case, sequences.shape[0]), replace=sequences.shape[0] < samples_per_case)
-            selected = [sequences[i] for i in idxs]
+            with np.load(file_path) as data:
+                sequences = data.get("sequences")
+                if sequences is None:
+                    continue
+                if sequences.ndim == 2:
+                    sequences = sequences[None, ...]
+                idxs = rng.choice(
+                    sequences.shape[0],
+                    size=min(samples_per_case, sequences.shape[0]),
+                    replace=sequences.shape[0] < samples_per_case,
+                )
+                selected = [sequences[i] for i in idxs]
             synthetic_features = _features_from_sequences(selected)
             acc, extras = _train_classifier(real_features, synthetic_features, seed=seed)
             results.append(

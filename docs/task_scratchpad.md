@@ -3,6 +3,7 @@
 Use this document to track actionable items, progress, and open questions. Update sections when starting or finishing work to keep continuity across sessions.
 
 ## Backlog
+- [ ] Profile GAN training loop after copy/memory tweaks (torch profiler + `nvidia-smi dmon`) – confirm GPU util after profiler run
 - Flesh out GAN training loop with replay buffer and detector co-training.
 - Persist processed gesture datasets to disk (parquet/npz) for faster reloads.
 - Expand neuromotor feature set (spectral metrics, Fitts residuals) and update models/tests accordingly.
@@ -16,9 +17,15 @@ Use this document to track actionable items, progress, and open questions. Updat
 - Add goal-geometry conditioning (`cosθ`, `sinθ`, distance, target width/style) to generator input.
 - Replace jerk penalty with curvature/lateral deviation losses in canonical frame; optionally add high-frequency band penalty.
 - Track theta_start/path-efficiency/jerk metrics post-change to confirm jitter matches real data.
+- Recreate paper-faithful data regime (click-to-click segmentation or Shen benchmark) to compare against gap-based gestures.
+- Configure unconditioned LSTM GAN run (no feature conditioning, shared LR) matching BeCAPTCHA training schedule.
+- Audit sigma baseline pipeline to mirror paper’s per-direction RF evaluation before reintroducing advanced constraints.
+- Switch gesture resampling to data-driven Δt (derive sampling rate from raw timestamp deltas per dataset).
+- Build octant bucketing pipeline (per-gesture atan2 binning + balanced loaders).
+- Prototype rotation-based augmentation to populate sparse octants while preserving original gestures.
 
 ## In Progress
-- *(empty — update when work begins)*
+- 2025-10-24: Plan & implement diffusion generator + D-eval hooks (diffusion package, training loop, metrics integration) — diffusion trainer + DDIM sampler scaffolded; GAN now calls diffusion eval (feature/density metrics) each epoch when configured; diffusion training now records C2ST metrics + CSV logger.
 
 ## Blocked
 - *(empty — add blockers as they arise)*
@@ -40,6 +47,10 @@ Use this document to track actionable items, progress, and open questions. Updat
 - 2025-02-15: Added gesture dataset -> dataloader utilities and integrated detector training loop with logging/checkpointing (`src/data/dataset.py`, `src/train/train_detector.py`, `tests/test_gesture_dataset.py`).
 - 2025-02-15: Implemented WGAN-GP training loop (`src/train/train_gan.py`) using GestureDataset with caching, replay buffer export, sample artifacts, metric CSV logging, summary JSON, optional detector co-training, and W&B artifact packaging.
 - 2025-02-15: Extended detector training (`src/train/train_detector.py`) with ROC/PR evaluation tables, CSV metrics, summary JSON, cross-dataset evaluation support, validation prediction exports, plotting utilities, and W&B artifact packaging; expanded evaluation/plotting utilities (`src/utils/eval.py`, `src/utils/plotting.py`).
+- 2025-02-16: Cached sigma-lognormal features inside `GestureDataset` for reuse during GAN training, updated `_feature_tensor_from_sequences` to avoid recomputing real batches, and raised GAN dataloader `num_workers` to 32 for faster pipeline throughput.
+- 2025-02-16: Parallelised sigma feature extraction for synthetic batches, moved cached tensors into shared memory, added configurable feature worker pool + persistent dataloader workers, tuned configs to curb memory spikes, and ported sigma features to torch with optional GPU execution.
+- 2025-10-22: Added cached dataset statistics/reservoir metadata pipeline (`src/data/dataset.py`), configurable feature reservoirs via `feature_reservoir_size`, and helper script `scripts/build_stats_cache.py` for regenerating stats.
+- 2025-10-22: Added `scripts/profile_gan_training.py` torch-profiler harness and updated GAN configs to consume conditioning reservoirs; training loop now uses reservoir-backed feature pools.
 
 ## Quick Links
 - Project overview: [project_overview.md](project_overview.md)

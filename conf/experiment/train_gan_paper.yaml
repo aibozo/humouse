@@ -15,6 +15,7 @@ data:
   normalize_features: false
   canonicalize_path: false
   canonicalize_duration: false
+  feature_reservoir_size: 32768
 
 model:
   architecture: lstm

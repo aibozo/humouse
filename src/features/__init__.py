@@ -10,8 +10,10 @@ from .neuromotor import (
 from .sigma_lognormal import (
     StrokeParams,
     decompose_sigma_lognormal,
+    decompose_sigma_lognormal_torch,
     sigma_lognormal_features_from_sequence,
     sigma_lognormal_features,
+    sigma_lognormal_features_torch,
 )
 
 __all__ = [
@@ -23,6 +25,8 @@ __all__ = [
     "tensor_to_gesture",
     "sigma_lognormal_features",
     "sigma_lognormal_features_from_sequence",
+    "sigma_lognormal_features_torch",
     "decompose_sigma_lognormal",
+    "decompose_sigma_lognormal_torch",
     "StrokeParams",
 ]

@@ -40,7 +40,7 @@ def _load_real_data(
     sequences = [seq.numpy() for seq, _, _ in dataset.samples]
     if not sequences:
         raise RuntimeError("No real gestures loaded; check dataset configuration.")
-    features = dataset.get_positive_features_tensor().numpy()
+    features = dataset.get_positive_features_tensor(use_full=True).numpy()
     return np.array(sequences, dtype=np.float32), features.astype(np.float32)
 
 

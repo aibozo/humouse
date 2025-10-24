@@ -51,10 +51,16 @@ def _finite_difference(values: np.ndarray, dt: np.ndarray) -> np.ndarray:
 
 def _smooth(values: np.ndarray, window_length: int = 7, polyorder: int = 3) -> np.ndarray:
     length = values.shape[0]
-    if length < window_length:
-        window_length = max(3, length // 2 * 2 + 1)
-        if window_length < 3:
-            return values
+    if length < 3:
+        return values
+    max_window = length if length % 2 == 1 else length - 1
+    if max_window < 3:
+        max_window = 3
+    window_length = min(window_length, max_window)
+    if window_length % 2 == 0:
+        window_length = max(3, window_length - 1)
+    if polyorder >= window_length:
+        polyorder = max(1, window_length - 1)
     return savgol_filter(values, window_length=window_length, polyorder=polyorder)
 
 

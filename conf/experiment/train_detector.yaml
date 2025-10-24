@@ -8,7 +8,7 @@ data:
   num_workers: 4
   use_generated_negatives: true
   max_gestures: 4096
-  sampling_rate: 100.0
+  sampling_rate: auto
   cache_enabled: true
   cache_dir: data/processed
   replay_path: checkpoints/gan/replay_buffer.pt
@@ -16,6 +16,8 @@ data:
   feature_mode: neuromotor
   eval_dataset_ids: []
   cross_eval_manifest: conf/datasets/cross_eval.yaml
+  use_click_boundaries: true
+  min_path_length: 10.0
 
 model:
   detector:

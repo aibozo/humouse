@@ -6,7 +6,7 @@ import json
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
 import torch
@@ -15,8 +15,10 @@ from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 
 from data.dataset import GestureDataset, GestureDatasetConfig
-from features import sigma_lognormal_features_from_sequence, tensor_to_gesture
+from features import sigma_lognormal_features_from_sequence, tensor_to_gesture, sigma_lognormal_features_torch
 from features.sigma_lognormal import decompose_sigma_lognormal, StrokeParams
+
+_BASELINE_CACHE: Dict[tuple, tuple["RealGestureStats", np.ndarray]] = {}
 
 
 @dataclass
@@ -297,12 +299,12 @@ def _collect_real_stats(dataset: GestureDataset) -> RealGestureStats:
 
 
 def _features_from_sequences(sequences: Iterable[np.ndarray]) -> np.ndarray:
-    feature_list: List[np.ndarray] = []
-    for seq in sequences:
-        tensor = torch.from_numpy(seq)
-        feature = sigma_lognormal_features_from_sequence(tensor)
-        feature_list.append(feature.numpy())
-    return np.stack(feature_list)
+    seq_list = list(sequences)
+    if not seq_list:
+        return np.empty((0, 37), dtype=np.float32)
+    tensor = torch.from_numpy(np.stack(seq_list)).to(dtype=torch.float32)
+    features = sigma_lognormal_features_torch(tensor).cpu().numpy()
+    return features
 
 
 def _train_classifier(X_real: np.ndarray, X_fake: np.ndarray, seed: int = 1337) -> Tuple[float, dict]:
@@ -335,25 +337,40 @@ def run_baseline(
     canonicalize_path: bool = True,
     canonicalize_duration: bool = True,
     sampling_rate: float | None = 200.0,
+    *,
+    make_plots: bool = True,
 ) -> dict:
-    dataset_cfg = GestureDatasetConfig(
-        dataset_id=dataset_id,
-        sequence_length=sequence_length,
-        max_gestures=max_gestures,
-        use_generated_negatives=False,
-        cache_enabled=False,
-        normalize_sequences=False,
-        normalize_features=False,
-        feature_mode="sigma_lognormal",
-        canonicalize_path=canonicalize_path,
-        canonicalize_duration=canonicalize_duration,
-        sampling_rate=sampling_rate,
+    cache_key = (
+        dataset_id,
+        sequence_length,
+        max_gestures,
+        canonicalize_path,
+        canonicalize_duration,
+        sampling_rate,
     )
-    dataset = GestureDataset(dataset_cfg)
-    stats = _collect_real_stats(dataset)
 
-    
-    real_features = dataset.get_positive_features_tensor().numpy()
+    cached = _BASELINE_CACHE.get(cache_key)
+    if cached is None:
+        dataset_cfg = GestureDatasetConfig(
+            dataset_id=dataset_id,
+            sequence_length=sequence_length,
+            max_gestures=max_gestures,
+            use_generated_negatives=False,
+            cache_enabled=False,
+            normalize_sequences=False,
+            normalize_features=False,
+            feature_mode="sigma_lognormal",
+            canonicalize_path=canonicalize_path,
+            canonicalize_duration=canonicalize_duration,
+            sampling_rate=sampling_rate,
+            feature_reservoir_size=None,
+        )
+        dataset = GestureDataset(dataset_cfg)
+        stats = _collect_real_stats(dataset)
+        real_features = dataset.get_positive_features_tensor(use_full=True).numpy()
+        _BASELINE_CACHE[cache_key] = (stats, real_features)
+    else:
+        stats, real_features = cached
 
     results = []
     sampling_rate = sampling_rate if sampling_rate is not None else 200.0
@@ -495,6 +512,7 @@ def main() -> None:
         canonicalize_path=args.canon_path,
         canonicalize_duration=args.canon_duration,
         sampling_rate=args.sampling_rate,
+        make_plots=True,
     )
     for item in summary["results"]:
         print(

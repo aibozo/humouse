@@ -13,6 +13,7 @@ Welcome to the **1-layer mouse GAN** project. Use this guide at the start of eve
 - **Neuromotor features:** [docs/neuromotor_features.md](docs/neuromotor_features.md)
 - **Dataset inventory:** [docs/data_inventory.md](docs/data_inventory.md)
 - **Experiment tracking:** [docs/experiment_tracking.md](docs/experiment_tracking.md)
+- **Local mouse collector:** [docs/local_mouse_collector.md](docs/local_mouse_collector.md)
 
 ## Environment
 - Virtual environment: `.venv` (created via `python3 -m venv .venv`).
@@ -29,6 +30,7 @@ Welcome to the **1-layer mouse GAN** project. Use this guide at the start of eve
 - Maintain reproducibility: deterministic seeds, config versioning, dataset hashes.
 - Track task progress in scratchpad (move items between Backlog/In Progress/Done).
 - Surface blockers promptly.
+- Keep the experiment changelog (`docs/changelog.md`) current: add an entry **before** starting a new run and fill in outcomes as soon as the run finishes; promote stable configs there when they meet acceptance criteria.
 
 ## Additional Notes
 - Dataset storage conventions: raw archives under `data/raw/<dataset>`; processed outputs under `data/processed/<dataset>`.

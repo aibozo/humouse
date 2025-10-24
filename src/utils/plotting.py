@@ -231,6 +231,10 @@ def generate_replay_vs_real_plots(
     real_feature_samples = real_features_np[real_feat_idx]
     replay_feature_samples = _compute_sigma_features(replay_sequences[replay_feat_idx])
 
+    feature_dim = min(real_feature_samples.shape[1], replay_feature_samples.shape[1])
+    real_feature_samples = real_feature_samples[:, :feature_dim]
+    replay_feature_samples = replay_feature_samples[:, :feature_dim]
+
     sequence_plot_path = output_dir / "trajectory_samples.png"
     feature_hist_path = output_dir / "sigma_feature_histograms.png"
     stats_path = output_dir / "histogram_summary.json"

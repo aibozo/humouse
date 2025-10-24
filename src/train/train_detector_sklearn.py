@@ -22,7 +22,7 @@ def _load_dataset(data_cfg: DataConfig) -> Tuple[np.ndarray, np.ndarray]:
         dataset_id=data_cfg.dataset_id,
         sequence_length=data_cfg.sequence_length,
         max_gestures=data_cfg.max_gestures,
-        min_events=5,
+        min_events=data_cfg.min_events,
         use_generated_negatives=data_cfg.use_generated_negatives,
         cache_enabled=data_cfg.cache_enabled,
         cache_dir=data_cfg.cache_dir,
@@ -31,6 +31,13 @@ def _load_dataset(data_cfg: DataConfig) -> Tuple[np.ndarray, np.ndarray]:
         normalize_sequences=data_cfg.normalize_sequences,
         normalize_features=data_cfg.normalize_features,
         feature_mode=data_cfg.feature_mode,
+        sampling_rate=data_cfg.sampling_rate,
+        use_click_boundaries=data_cfg.use_click_boundaries,
+        click_button=data_cfg.click_button,
+        direction_buckets=data_cfg.direction_buckets,
+        rotate_to_buckets=data_cfg.rotate_to_buckets,
+        min_path_length=data_cfg.min_path_length,
+        feature_reservoir_size=data_cfg.feature_reservoir_size,
     )
     dataset = GestureDataset(dataset_cfg)
     features = []

@@ -159,6 +159,14 @@ def _prepare_dataloaders(experiment_cfg: DetectorExperimentConfig) -> tuple[Data
         normalize_sequences=experiment_cfg.data.normalize_sequences,
         normalize_features=experiment_cfg.data.normalize_features,
         feature_mode=experiment_cfg.data.feature_mode,
+        sampling_rate=experiment_cfg.data.sampling_rate,
+        min_events=experiment_cfg.data.min_events,
+        use_click_boundaries=experiment_cfg.data.use_click_boundaries,
+        click_button=experiment_cfg.data.click_button,
+        direction_buckets=experiment_cfg.data.direction_buckets,
+        rotate_to_buckets=experiment_cfg.data.rotate_to_buckets,
+        min_path_length=experiment_cfg.data.min_path_length,
+        feature_reservoir_size=experiment_cfg.data.feature_reservoir_size,
     )
     dataset = GestureDataset(dataset_cfg)
     if len(dataset) == 0:
@@ -202,6 +210,14 @@ def _evaluate_on_dataset(
         normalize_sequences=experiment_cfg.data.normalize_sequences,
         normalize_features=experiment_cfg.data.normalize_features,
         feature_mode=experiment_cfg.data.feature_mode,
+        sampling_rate=experiment_cfg.data.sampling_rate,
+        min_events=experiment_cfg.data.min_events,
+        use_click_boundaries=experiment_cfg.data.use_click_boundaries,
+        click_button=experiment_cfg.data.click_button,
+        direction_buckets=experiment_cfg.data.direction_buckets,
+        rotate_to_buckets=experiment_cfg.data.rotate_to_buckets,
+        min_path_length=experiment_cfg.data.min_path_length,
+        feature_reservoir_size=experiment_cfg.data.feature_reservoir_size,
     )
     dataset = GestureDataset(eval_cfg)
     if len(dataset) == 0:

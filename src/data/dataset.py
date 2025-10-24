@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import json
+import random
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -16,6 +18,7 @@ from . import (
     load_attentive_cursor,
     load_balabit,
     load_bogazici,
+    load_local_mouse,
     load_sapimouse,
     segment_event_stream,
 )
@@ -36,9 +39,12 @@ NUM_DIRECTION_BUCKETS = 8
 _DATASET_LOADERS: dict[str, LoaderFn] = {
     "balabit": load_balabit,
     "bogazici": load_bogazici,
+    "local_mouse": load_local_mouse,
     "sapimouse": load_sapimouse,
     "attentive_cursor": load_attentive_cursor,
 }
+
+_STATS_VERSION = 1
 
 
 def _estimate_sampling_rate(
@@ -112,6 +118,7 @@ class GestureDatasetConfig:
     rotate_to_buckets: bool = False
     min_path_length: float = 0.0
     min_path_length: float = 0.0
+    feature_reservoir_size: Optional[int] = None
 
 
 def _goal_geometry_features(
@@ -211,6 +218,8 @@ class GestureDataset(Dataset):
         self._positive_sequences: List[np.ndarray] = []
         self._positive_features: List[np.ndarray] = []
         self._positive_features_tensor: Optional[torch.Tensor] = None
+        self._feature_reservoir_tensor: Optional[torch.Tensor] = None
+        self._conditioning_features_tensor: Optional[torch.Tensor] = None
         self._positive_feature_cache: Dict[str, int] = {}
         self._shared_positive_sequences: Optional[torch.Tensor] = None
         self._shared_positive_features: Optional[torch.Tensor] = None
@@ -388,7 +397,9 @@ class GestureDataset(Dataset):
             self._populate_feature_cache()
             self._save_to_cache()
         self._init_shared_positive_tensors()
-        self._compute_statistics()
+        if not self._load_statistics_metadata():
+            self._compute_statistics()
+            self._save_statistics_metadata()
 
         feature_dim = None
         for seq_np, feat_np in zip(self._positive_sequences, self._positive_features):
@@ -494,6 +505,120 @@ class GestureDataset(Dataset):
         # invoked, leading to conditioning vectors with incorrect scale.
         self._positive_features_tensor = None
 
+    def _cache_signature(self) -> Optional[str]:
+        cache_path = self._cache_path()
+        if cache_path is None:
+            return None
+        return cache_path.stem
+
+    def _metadata_paths(self) -> tuple[Optional[Path], Optional[Path]]:
+        cache_path = self._cache_path()
+        if cache_path is None:
+            return None, None
+        base = Path(str(cache_path))
+        meta_path = Path(f"{base}.meta.json")
+        reservoir_path = Path(f"{base}.reservoir.pt")
+        return meta_path, reservoir_path
+
+    def metadata_paths(self) -> tuple[Optional[Path], Optional[Path]]:
+        """Return paths to cached metadata (JSON) and reservoir tensor."""
+        return self._metadata_paths()
+
+    def _load_statistics_metadata(self) -> bool:
+        meta_path, reservoir_path = self._metadata_paths()
+        if meta_path is None or not meta_path.exists():
+            return False
+        try:
+            raw = meta_path.read_text()
+            meta = json.loads(raw)
+        except (OSError, json.JSONDecodeError):
+            return False
+
+        if meta.get("version") != _STATS_VERSION:
+            return False
+
+        signature = self._cache_signature()
+        if signature is not None and meta.get("signature") != signature:
+            return False
+
+        config_meta = meta.get("config", {})
+        if bool(config_meta.get("normalize_sequences", self.config.normalize_sequences)) != self.config.normalize_sequences:
+            return False
+        if bool(config_meta.get("normalize_features", self.config.normalize_features)) != self.config.normalize_features:
+            return False
+        if config_meta.get("feature_mode", self.config.feature_mode) != self.config.feature_mode:
+            return False
+
+        requested_reservoir = int(self.config.feature_reservoir_size or 0)
+        stored_reservoir = int(meta.get("feature_reservoir_size", 0))
+        if requested_reservoir != stored_reservoir:
+            return False
+
+        try:
+            seq_mean = torch.tensor(meta["sequence_mean"], dtype=torch.float32)
+            seq_std = torch.tensor(meta["sequence_std"], dtype=torch.float32)
+            feat_mean = torch.tensor(meta["feature_mean"], dtype=torch.float32)
+            feat_std = torch.tensor(meta["feature_std"], dtype=torch.float32)
+        except (KeyError, TypeError, ValueError):
+            return False
+
+        self._sequence_mean = seq_mean
+        self._sequence_std = torch.clamp(seq_std, min=1e-6)
+        self._feature_mean = feat_mean
+        self._feature_std = torch.clamp(feat_std, min=1e-6)
+        self._positive_features_tensor = None
+
+        self._feature_reservoir_tensor = None
+        self._conditioning_features_tensor = None
+        if stored_reservoir > 0:
+            if reservoir_path is None or not reservoir_path.exists():
+                return False
+            try:
+                reservoir_tensor = torch.load(reservoir_path)
+            except (OSError, RuntimeError):
+                return False
+            if not isinstance(reservoir_tensor, torch.Tensor):
+                return False
+            if reservoir_tensor.dtype != torch.float32:
+                reservoir_tensor = reservoir_tensor.float()
+            self._feature_reservoir_tensor = reservoir_tensor.contiguous()
+            self._conditioning_features_tensor = self._feature_reservoir_tensor
+        return True
+
+    def _save_statistics_metadata(self) -> None:
+        meta_path, reservoir_path = self._metadata_paths()
+        if meta_path is None:
+            return
+        meta = {
+            "version": _STATS_VERSION,
+            "signature": self._cache_signature(),
+            "sequence_mean": self._sequence_mean.tolist() if self._sequence_mean is not None else [],
+            "sequence_std": self._sequence_std.tolist() if self._sequence_std is not None else [],
+            "feature_mean": self._feature_mean.tolist() if self._feature_mean is not None else [],
+            "feature_std": self._feature_std.tolist() if self._feature_std is not None else [],
+            "feature_reservoir_size": int(self._feature_reservoir_tensor.size(0)) if self._feature_reservoir_tensor is not None else 0,
+            "config": {
+                "normalize_sequences": self.config.normalize_sequences,
+                "normalize_features": self.config.normalize_features,
+                "feature_mode": self.config.feature_mode,
+                "feature_reservoir_size": int(self.config.feature_reservoir_size or 0),
+            },
+        }
+        try:
+            meta_path.write_text(json.dumps(meta, indent=2))
+        except OSError:
+            return
+        if self._feature_reservoir_tensor is not None and reservoir_path is not None:
+            try:
+                torch.save(self._feature_reservoir_tensor.cpu(), reservoir_path)
+            except OSError:
+                pass
+        elif reservoir_path is not None and reservoir_path.exists():
+            try:
+                reservoir_path.unlink()
+            except OSError:
+                pass
+
     def _populate_feature_cache(self) -> None:
         self._positive_feature_cache = {}
         if not self._positive_sequences or not self._positive_features:
@@ -575,18 +700,32 @@ class GestureDataset(Dataset):
             feat_t = feat_t.contiguous()
             self.samples.append((seq_t, feat_t, torch.tensor(0.0)))
 
-    def get_positive_features_tensor(self, device: Optional[torch.device] = None) -> torch.Tensor:
-        if not self._positive_features:
-            return torch.empty((0, 0))
+    def _get_full_positive_features_tensor(self) -> torch.Tensor:
         if self._positive_features_tensor is None:
-            features = np.array(self._positive_features, dtype=np.float32)
-            tensor = torch.from_numpy(features)
-            if self.config.normalize_features:
-                tensor = self._apply_feature_normalization(tensor)
-            self._positive_features_tensor = tensor
-        tensor = self._positive_features_tensor
+            if not self._positive_features:
+                self._positive_features_tensor = torch.empty((0, 0), dtype=torch.float32)
+            else:
+                features = np.array(self._positive_features, dtype=np.float32)
+                tensor = torch.from_numpy(features)
+                if self.config.normalize_features:
+                    tensor = self._apply_feature_normalization(tensor)
+                self._positive_features_tensor = tensor.contiguous()
+        return self._positive_features_tensor
+
+    def get_positive_features_tensor(
+        self,
+        device: Optional[torch.device] = None,
+        *,
+        use_full: bool = False,
+    ) -> torch.Tensor:
+        if use_full:
+            tensor = self._get_full_positive_features_tensor()
+        else:
+            tensor = self._conditioning_features_tensor
+            if tensor is None:
+                tensor = self._get_full_positive_features_tensor()
         if device is not None:
-            return tensor.to(device)
+            tensor = tensor.to(device)
         return tensor.clone()
 
     # ------------------------------------------------------------------
@@ -594,27 +733,70 @@ class GestureDataset(Dataset):
     # ------------------------------------------------------------------
 
     def _compute_statistics(self) -> None:
-        if self._positive_sequences:
-            seq_stack = np.stack(self._positive_sequences, axis=0)
-            seq_mean = seq_stack.mean(axis=(0, 1)).astype(np.float32)
-            seq_std = seq_stack.std(axis=(0, 1)).astype(np.float32)
-        else:
+        seq_sum = np.zeros(3, dtype=np.float64)
+        seq_sq_sum = np.zeros(3, dtype=np.float64)
+        seq_count = 0
+        for seq_np in self._positive_sequences:
+            seq64 = seq_np.astype(np.float64, copy=False)
+            seq_sum += seq64.sum(axis=0)
+            seq_sq_sum += (seq64**2).sum(axis=0)
+            seq_count += seq_np.shape[0]
+
+        if seq_count == 0:
             seq_mean = np.zeros(3, dtype=np.float32)
             seq_std = np.ones(3, dtype=np.float32)
-        seq_std = np.where(seq_std < 1e-6, 1.0, seq_std)
+        else:
+            mean64 = seq_sum / seq_count
+            var64 = np.maximum(seq_sq_sum / seq_count - mean64**2, 1e-6)
+            seq_mean = mean64.astype(np.float32)
+            seq_std = np.sqrt(var64).astype(np.float32)
+
         self._sequence_mean = torch.from_numpy(seq_mean)
         self._sequence_std = torch.from_numpy(seq_std)
 
-        if self._positive_features:
-            feat_stack = np.stack(self._positive_features, axis=0)
-            feat_mean = feat_stack.mean(axis=0).astype(np.float32)
-            feat_std = feat_stack.std(axis=0).astype(np.float32)
-        else:
+        feat_count = len(self._positive_features)
+        if feat_count == 0:
             feat_mean = np.zeros(1, dtype=np.float32)
             feat_std = np.ones(1, dtype=np.float32)
-        feat_std = np.where(feat_std < 1e-6, 1.0, feat_std)
+        else:
+            feat_dim = self._positive_features[0].shape[0]
+            feat_sum = np.zeros(feat_dim, dtype=np.float64)
+            feat_sq_sum = np.zeros(feat_dim, dtype=np.float64)
+            for feat_np in self._positive_features:
+                feat64 = feat_np.astype(np.float64, copy=False)
+                feat_sum += feat64
+                feat_sq_sum += feat64**2
+            mean64 = feat_sum / feat_count
+            var64 = np.maximum(feat_sq_sum / feat_count - mean64**2, 1e-6)
+            feat_mean = mean64.astype(np.float32)
+            feat_std = np.sqrt(var64).astype(np.float32)
+
         self._feature_mean = torch.from_numpy(feat_mean)
         self._feature_std = torch.from_numpy(feat_std)
+        self._positive_features_tensor = None
+
+        reservoir_size = int(self.config.feature_reservoir_size or 0)
+        self._feature_reservoir_tensor = None
+        self._conditioning_features_tensor = None
+        if reservoir_size > 0 and feat_count > 0:
+            max_size = min(reservoir_size, feat_count)
+            reservoir: list[np.ndarray] = []
+            rng = random.Random(1337)
+            for idx, feat_np in enumerate(self._positive_features):
+                feat_vec = feat_np.astype(np.float32, copy=False)
+                if idx < max_size:
+                    reservoir.append(feat_vec.copy())
+                else:
+                    replace_idx = rng.randint(0, idx)
+                    if replace_idx < max_size:
+                        reservoir[replace_idx] = feat_vec.copy()
+            if reservoir:
+                reservoir_array = np.stack(reservoir, axis=0).astype(np.float32)
+                reservoir_tensor = torch.from_numpy(reservoir_array)
+                if self.config.normalize_features:
+                    reservoir_tensor = self._apply_feature_normalization(reservoir_tensor)
+                self._feature_reservoir_tensor = reservoir_tensor.contiguous()
+                self._conditioning_features_tensor = self._feature_reservoir_tensor
 
     def _apply_sequence_normalization(self, sequence: torch.Tensor) -> torch.Tensor:
         if self._sequence_mean is None or self._sequence_std is None:

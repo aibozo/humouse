@@ -16,6 +16,7 @@ data:
   canonicalize_path: false
   canonicalize_duration: false
   include_goal_geometry: true
+  feature_reservoir_size: 32768
 
 model:
   architecture: tcn
@@ -35,39 +36,56 @@ model:
     use_spectral_norm: true
 
 training:
-  epochs: 50
+  epochs: 5000
   lr:
-    generator: 0.00005
-    discriminator: 0.0001
+    generator: 0.0002
+    discriminator: 0.0002
   betas: [0.5, 0.999]
   gradient_penalty_weight: 10.0
   discriminator_steps: 1
   log_interval: 50
   sample_interval: 200
   replay_buffer_path: checkpoints/gan/replay_buffer.pt
-  replay_samples_per_epoch: 256
+  replay_samples_per_epoch: 128
   replay_buffer_max_size: 5000
   co_train_detector: false
   detector_update_every: 5
   detector_config_path: conf/experiment/train_detector.yaml
   detector_epochs_per_update: 1
-  reconstruction_epochs: 5
+  reconstruction_epochs: 0
   reconstruction_loss_weight: 0.001
   adversarial_type: vanilla
   sigma_eval_enabled: true
-  sigma_eval_interval: 1
-  sigma_eval_samples: 512
+  sigma_eval_interval: 10
+  sigma_eval_samples: 256
   sigma_eval_dataset_id: null
-  sigma_eval_max_gestures: 4096
-  curvature_match_weight: 0.05
-  lateral_match_weight: 0.1
-  direction_match_weight: 5.0
+  sigma_eval_max_gestures: 2048
+  curvature_match_weight: 0.00
+  lateral_match_weight: 0.0
+  direction_match_weight: 0.0
+  adaptive_freeze_enabled: false
+  fake_batch_ratio: 0.5
+  fake_batch_ratio_start: 0.2
+  fake_batch_ratio_warmup: 75
+  ada_enabled: true
+  ada_target: 0.7
+  ada_interval: 8
+  ada_rate: 0.05
+  ada_p_init: 0.0
+  ada_p_max: 0.95
+  adaptive_lr_enabled: true
+  adaptive_lr_target: 0.7
+  adaptive_lr_warmup: 100
+  adaptive_lr_error_gain: 3.0
+  adaptive_lr_derivative_gain: 1.5
+  adaptive_lr_min: 5e-6
+  adaptive_lr_max: 2e-4
 
 logging:
   target: wandb
   project: mouse-gan
   entity: null
-  mode: offline
+  mode: online
   log_interval: 50
   checkpoint_dir: checkpoints/gan
   tags: [baseline, gan]

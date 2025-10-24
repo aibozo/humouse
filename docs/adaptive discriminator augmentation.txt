@@ -1,0 +1,494 @@
+where we observe that the multiplier in front of each Gk is given by the cyclic convolution of the
+elements of the vectors p and q. This can be written as a pointwise product in terms of the Discrete
+Fourier Transform F, denoting the DFT’s of p and q by a hat:
+=
+N −1∑
+k=0
+[F−1(ˆp ˆq)]kGk (14)
+To recover the sought after inverse, assuming every element of ˆp is nonzero, we set ˆqi = 1
+ˆpi for all i:
+=
+N −1∑
+k=0
+[F−1(ˆp ˆp−1)]kGk (15)
+=
+N −1∑
+k=0
+[F−11]kGk (16)
+= G0 (17)
+= I (18)
+Here, we take advantage of the fact that the inverse DFT of a constant vector of ones is the vector
+[1, 0, ..., 0].
+In summary, the product of U and T effectively computes a convolution between their respective
+group element weights. This convolution assigns all of the weight to the identity element precisely
+when one has ˆqi = 1
+ˆpi , for all i, whereby U is the inverse of T . This inverse only exists when the
+Fourier transform ˆpi of the augmentation probability weights has no zeros.
+The intuition is that the mixture of group transformations “smears” probability mass among the
+different transformed versions of the distribution. Analogously to classical deconvolution, this
+smearing can be undone (“deconvolved”) as long as the convolution does not destroy any frequencies
+by scaling them to zero.
+Some noteworthy consequences of this are:
+• Assume p is a constant vector 1
+N 1, that is, the augmentation applies the group elements with
+uniform probability. In this case ˆp = δ0 and convolution with any zero-mean weight vector
+is zero. This case is almost certain to cause leaks of the group elements themselves. To see
+this directly, the mixed augmentation operator is now T := 1
+N
+∑N −1
+j=0 Gj . Consider the true
+distribution of training samples y, and a version y′ = Gky into which some element of the
+transformation group has leaked. Now,
+T y′ = T (Gky) = 1
+N
+N −1∑
+j=0
+Gj Gky = 1
+N
+N −1∑
+j=0
+Gj+ky = 1
+N
+N −1∑
+j=0
+Gj y = T y (19)
+(recalling the modulo arithmetic in the group powers). By Eq. 7, this is a leak, and the
+training may equally well learn the distribution Gky rather than y. By the same reasoning,
+any mixture of transformed elements may be learned (possibly even a different one for each
+image).
+• Similarly, if p is periodic (with period that is some integer factor of N , other than N itself),
+the Fourier transform is a sparse sequence of spikes separated by zeros. Another viewpoint
+to this is that the group has a subgroup, whose elements are chosen uniformly. Similar to
+above, this is almost certain to cause leaks with elements of that subgroup.
+• With more sporadic zero patterns, the leaks can be seen as “conditional”: while the augmen-
+tation operator has a null space, it is not generally possible to write an equivalent of Eq. 19
+without setting conditions on the distribution y itself. In these cases, leaks only occur for
+speciﬁc kinds of distributions, e.g., when a sufﬁcient amount of group symmetry is already
+present in the distribution itself.
+For example, consider a dataset where all four 90 degree orientations of any image are
+equally likely, and an augmentation that performs either a 0 or 90 degree rotation at equal
+probability. This corresponds to the probability vector p = [0.5, 0.5, 0, 0] over the four
+28
+elements of the 90-degree rotation group. This distribution has a single zero in its Fourier
+transform. The associated leak might manifest as the generator only learning to produce
+images in orientations 0 and 180 degrees, and relying on the augmentation to ﬁll the gaps.
+Such a leak could not happen in e.g. a dataset depicting upright faces, and the failure of
+invertibility would be harmless in this case. However, this may no longer hold when the
+augmentation is a part of a composed pipeline, as other augmentations may have introduced
+partial invariances that were not present in the original data.
+In our augmentations involving compact groups (rotations and ﬂips), we always choose the elements
+with a uniform probability, but importantly, only perform the augmentation with some probability
+less than one. This combination can be viewed as increasing the probability of choosing the group
+identity element. The probability vector p is then constant, except for having a higher value at p0; the
+Fourier transform of such a vector has no zeros.
+Non-compact discrete one-parameter groups The above reasoning can be extended to groups
+which are not compact, in particular translations by integer offsets (without periodic boundaries).
+In the discrete case, such a group is necessarily isomorphic to the additive group Z of all integers, and
+no modulo integer arithmetic is performed. The mixture density is then a two-sided sequence {pi}
+with i ∈ Z, and the appropriate Fourier transform maps this to a periodic function. By an analogous
+reasoning with the previous subsection, the invertibility holds as long as this spectrum has no zeros.
+Continuous one-parameter groups With suitable technical care, these arguments can be extended
+to continuous groups with elements Gφ indexed by a continuous parameter φ. In the compact case
+(e.g. continuous rotation), the group elements wrap over at some period L, such that Gφ+L = Gφ.
+In the non-compact case (e.g. translation (addition) and scaling (multiplication) by real-valued
+amounts) no such wrap-over occurs. The compact and non-compact groups are isomorphic to U(1),
+and the additive group R, respectively. Stochastic mixtures of these group elements are expressed by
+probability density functions p(φ), with φ ∈ [0, L) if the group is compact, and φ ∈ R otherwise.
+The Fourier transforms are replaced by the appropriate generalizations, and the invertibility holds
+when the spectrum has no zeros.
+Here it is important to use the correct parametrization of the group. Note that one could in principle
+parametrize e.g. rotations in arbitrary ways, and it may seem ambiguous as to what parametrization
+to use, which would appear to render concepts like uniform distribution meaningless. The issue
+arises when replacing the sums in the earlier formulas with integrals, whereby one needs to choose
+a measure of integration. These ﬁndings apply speciﬁcally to the natural Haar measure and the
+associated parametrization – essentially, the measure that accumulates at constant rate when taking
+small steps in the group by applying the inﬁnitesimal generator. For rotation groups, the usual “area”
+measure over the angular parametrization coincides with the Haar measure, and therefore e.g. uniform
+distribution is taken to mean that all angles are chosen equally likely. For translation, the natural
+Euclidian distance is the correct parametrization. For other groups, such as scaling, the choice is a
+bit more nuanced: when composing scaling operations, the scale factor combines by multiplication
+instead of addition, so the natural parametrization is the logarithm of the scale factor.
+For continuous compact groups (rotation), we use the same scheme as in the discrete case: uniform
+probability mixed with identity at a probability greater than zero.
+For continuous non-compact groups, the Fourier transform of the normal distribution has no zeros
+and results in an invertible augmentation when used to choose among the group elements. Other
+distributions with this property are at least the α-stable and more generally the inﬁnitely divisible
+family of distributions. When the parametrization is logarithmic, we may instead use exponentiated
+values from these distributions (e.g. the log-normal distribution). Finally, stochastically mixing
+zero-mean normal distributed variables with identity does not introduce zeros to the FT, as it merely
+lifts the already positive values of the spectrum.
+Multi-parameter abelian groups Finally, these ﬁndings generalize to groups that are products of a
+ﬁnite number of single-parameter groups, provided that the elements of the different groups commute
+29
+among each other (in other words, ﬁnitely generated abelian groups). An example of this is the group
+of 2-dimensional translations obtained by considering x- and y-translations simultaneously.6
+The Fourier transforms are replaced with suitable multi-dimensional generalizations, and the proba-
+bility distributions and their Fourier transforms obtain multidimensional domains accordingly.
+Discussion Invertibility is a sufﬁcient condition to ensure the absence of leaks. However, it may
+not always be necessary: in the case of non-compact groups, a hypothesis could be made that even a
+technically non-invertible operator does not leak. For example, a shift augmentation with uniform
+distributed offset on a continuous interval is not invertible, as the Fourier transform of its density is a
+sinc function with periodic zeros (except at 0). This only allows for leaks of zero-mean functions
+whose FT is supported on this evenly spaced set of frequencies – in other words, inﬁnitely periodic
+functions. Even though such functions are in the null space of the augmentation operator, they
+cannot be added to any density in an inﬁnite domain without violating non-negativity, and so we
+may hypothesize that no leak can in fact occur. In practice, however, the near-zero spectrum values
+might allow for a periodic leak modulated by a wide window function to occur for very speciﬁc (and
+possibly contrived) data distributions.
+In contrast, straightforward examples and practical demonstrations of leaks are easily found for
+compact groups, e.g. with uniform or periodic rotations.
+C.4.3 Noise and image ﬁlter augmentations
+We refer to Theorem 5.3. of Bora et al. [ 4 ], where it is shown that in a setting effectively identical to
+ours, addition of noise that is independent of the image is an invertible operation as long as the
+Fourier spectrum of the noise distribution does not contain zeros. The reason is that addition of
+mutually independent random variables results in a convolution of their probability distributions.
+Similar to groups, this is a multiplication in the Fourier domain, and the zeros correspond to
+irrevocable loss of information, making the inversion impossible. The inverse can be realized by
+“deconvolution”, or division in the Fourier domain.
+A potential source of confusion is that the Fourier transform is commonly used to describe spatial
+correlations of noise in signal processing. We refer to a different concept, namely the Fourier
+transform of the probability density of the noise, often called the characteristic function in probability
+literature (although correlated noise is also subsumed by this analysis).
+Gaussian product noise In our setting, we also randomize the magnitude parameter of the noise,
+in effect stochastically mixing between different noise distributions. The above analysis subsumes
+this case, as the mixture is also a random noise, with a density that is a weighted blend between the
+densities of the base noises. However, the noise is no longer independent across points, so its joint
+distribution is no longer separable to a product of marginals, and one must consider the joint Fourier
+transform in full dimension.
+Speciﬁcally, we draw the per-pixel noise from a normal distribution and modulate this entire noise
+ﬁeld by a multiplication with a single (half-)normal random number. The resulting distribution has
+an everywhere nonzero Fourier transform and hence is invertible. To see this, ﬁrst consider two
+standard normal distributed random scalars X and Y , and their product Z = XY (taken in the
+sense of multiplying the random variables, not the densities). Then Z is distributed according to
+the density pZ (Z) = K0(|Z|)
+π , where K0 is a modiﬁed Bessel function, and has the characteristic
+function (Fourier transform) ˆpZ (ω) = 1√ω2+1 , which is everywhere positive [46].
+Then, considering our situation with a product of a normal distributed scalar X and an independent
+normal distributed vector Y ∈ RN , the N entries of the product Z = XY become mutually
+dependent. The marginal distribution of each entry is nevertheless exactly the above product
+distribution pZ . By Fourier slice theorem, all one-dimensional slices through the main axes of the
+characteristic function of Z must then coincide with the characteristic function ˆpZ of this marginal
+6However, for example the non-abelian group of 3-dimensional rotations, SO(3), is not obtained as a product
+of the single-parameter “Euler angle” rotations along three axes, and therefore is not covered by the present
+formulation of our theory. The reason is that the three different rotations do not commute. One may of course
+still freely compose the three single-parameter rotation augmentations in sequence, but note that the combined
+effect can only induce a subset of possible probability distributions on SO(3).
+30
+distribution. Finally, because the joint distribution is radially symmetric, so is the characteristic
+function, and this must apply to all slices through the origin, yielding the everywhere positive Fourier
+transform ˆpZ(ω) = 1√|ω|2+1 . When stochastically mixed with identity (as is our random skipping
+procedure), the Fourier Transform values are merely lifted towards 1 and no new zero-crossings are
+introduced.
+Additive noise in transformed bases Similar notes apply to additive noise in a different basis: one
+can consider the noise augmentation as being ﬂanked by an invertible deterministic (possibly also
+nonlinear) basis transformation and its inverse. It then sufﬁces to show that the additive noise has a
+non-zero spectrum in isolation. In particular, multiplicative noise with a non-negative distribution
+can be viewed as additive noise in logarithmic space and is invertible if the logarithmic version of the
+noise distribution has no zeros in its Fourier transform. The image-space ﬁlters are a combination
+of a linear basis transformation to the wavelet basis, and additive Gaussian noise under a non-linear
+logarithmic transformation.
+C.4.4 Random projection augmentations
+The cutout augmentation (as well as e.g. the pixel and patch blocking in AmbientGAN [4]) can be
+interpreted as projecting a random subset of the dimensions to zero.
+Let P1, P2, ..., PN be a set of deterministic projection augmentation operators with the deﬁning
+property that P2
+j = Pj . For example, each one of these operators can set a different ﬁxed rectangular
+region to zero. Clearly the individual projections have a null space (unless they are the identity
+projection) and they are not invertible in isolation.
+Consider a stochastic augmentation that randomly applies one of these projections, or the identity.
+Let p0, p1, ..., pN denote the discrete probabilities of choosing the identity operator I for p0, and
+Pk for the remaining pk. Deﬁne the mixture of the projections as:
+T = p0I +
+N∑
+j=1
+pj Pj (20)
+Again, T is a mixture of operators, however unlike in earlier examples, some (but not all) of the
+operators are non-invertible. Under what conditions on the probability distribution p is T invertible?
+Assume that T is not invertible, i.e. there exists a probability distribution x 6 = 0 such that T x = 0.
+Then
+0 = T x = p0x +
+N∑
+j=1
+pj Pj x (21)
+and rearranging,
+N∑
+j=1
+pj Pj x = −p0x (22)
+Under reasonable technical assumptions (e.g. discreteness of the pixel intensity values, such as
+justiﬁed in Theorem 5.4. of Bora et al. [4]), we can consider the inner product of both sides of this
+equation with x:
+N∑
+j=1
+pj 〈x, Pj x〉 = −p0〈x, x〉 (23)
+The right side of this equation is strictly negative if the probability p0 of identity is greater than
+zero, as x 6 = 0. The left side is a non-negative sum of non-negative terms, as the inner product
+of a vector with its projection is non-negative. Therefore, the assumption leads to a contradiction
+unless p0 = 0; conversely, random projection augmentation does not leak if there is a non-zero
+probability that it produces the identity.
+31
+C.5 Practical considerations
+C.5.1 Conditioning
+In practical numerical computation, an operator that is technically invertible may nevertheless be so
+close to a non-invertible conﬁguration that inversion fails in practice. Assuming a ﬁnite state space,
+this notion is captured by the condition number, which is inﬁnite when the matrix is singular, and
+large when it is singular for all practical purposes. The same consideration applies to inﬁnite state
+spaces, but the appropriate technical notion of conditioning is less clear.
+The practical value of the analysis in this section is in identifying the conditions where exact non-
+invertibility happens, so that appropriate safety margin can be kept. We achieve this by regulating the
+probability p of performing a given augmentation, and keeping it at a safe distance from p = 1 which
+for many of the augmentations corresponds to a non-invertible condition (e.g. uniform distribution
+over compact group elements).
+For example, consider applying transformations from a ﬁnite group with a uniform probability
+distribution, where the augmentation is applied with probability p. In a ﬁnite state space, a matrix
+corresponding to this augmentation has 1 − p for its smallest singular value, and 1 for the largest,
+resulting in condition number 1/(1 − p) which approaches inﬁnity as p approaches one.
+C.5.2 Pixel-level effects and boundaries
+When dealing with images represented on ﬁnite pixel grids, naive practical implementations of some
+of the group transformations do not strictly speaking form groups. For example, a composition of
+two continuous rotations of an image with angles φ and θ does not generally reproduce the same
+image as a single rotation by angle φ + θ, if the transformed image is resampled to the rectangular
+pixel grid twice. Furthermore, parts of the image may fall outside the boundaries of the grid, whereby
+their values are lost and cannot be restored even if a reverse transformation is made afterwards,
+unless special care is taken. These effects may become signiﬁcant when multiple transformations are
+composed.
+In our implementation, we mitigate these issues as much as possible by accumulating the chain of
+transformations into a matrix and a vector representing the total afﬁne transformation implemented
+by all the grouped augmentations, and only then applying it on the image. This is possible because
+all the augmentations we use are afﬁne transformations in the image (or color) space. Furthermore,
+prior to applying the geometric transformations, the images are reﬂection padded and scaled to
+double resolution (and conversely, cropped and downscaled afterwards). Effectively the image is
+then treated as an inﬁnite tiling of suitably reﬂected ﬁner-resolution copies of itself, and a practical
+target-resolution crop is only sampled at augmentation time.
+D Implementation details
+We implemented our techniques on top of the StyleGAN2 ofﬁcial TensorFlow implementation7. We
+kept most of the details unchanged, including network architectures [21 ], weight demodulation [ 21 ],
+path length regularization [ 21], lazy regularization [ 21 ], style mixing regularization [ 20 ], bilinear
+ﬁltering in all up/downsampling layers [20 ], equalized learning rate for all trainable parameters [ 19],
+minibatch standard deviation layer at the end of the discriminator [ 19 ], exponential moving average
+of generator weights [ 19], non-saturating logistic loss [14 ] with R1 regularization [30 ], and Adam
+optimizer [24] with β1 = 0, β2 = 0.99, and  = 10−8.
+We ran our experiments on a computing cluster with a few dozen NVIDIA DGX-1s, each containing
+8 Tesla V100 GPUs, using TensorFlow 1.14.0, PyTorch 1.1.0 (for comparison methods), CUDA 10.0,
+and cuDNN 7.6.3. We used the ofﬁcial pre-trained Inception network8 to compute FID, KID, and
+Inception score.
+32
+Parameter StyleGAN2
+conﬁg F
+Our
+baseline
+BreCaHAD,
+AFHQ MetFaces CIFAR-10 + Tuning
+Resolution 1024×1024 256×256 512×512 1024×1024 32×32 32×32
+Number of GPUs 8 8 8 8 2 2
+Training length 25M 25M 25M 25M 100M 100M
+Minibatch size 32 64 64 32 64 64
+Minibatch stddev 4 8 8 4 32 32
+Dataset x-ﬂips X/ – – X X – –
+Feature maps 1× 1
+2 × 1× 1× 512 512
+Learning rate η×103 2 2.5 2.5 2 2.5 2.5
+R1 regularization γ 10 1 0.5 2 0.01 0.01
+G moving average 10k 20k 20k 10k 500k 500k
+Mixed-precision – X X X X X
+Mapping net depth 8 8 8 8 8 2
+Style mixing reg. X X X X X –
+Path length reg. X X X X X –
+Resnet D X X X X X –
+Figure 24: Hyperparameters used in each experiment.
+D.1 Hyperparameters and training conﬁgurations
+Figure 24 shows the hyperparameters that we used in our experiments, as well as the original
+StyleGAN2 conﬁg F [21 ]. We performed all training runs using 8 GPUs and continued the training
+until the discriminator had seen a total of 25M real images, except for CIFAR-10, where we used
+2 GPUs and 100M images. We used minibatch size of 64 when possible, but reverted to 32 for
+METFACES in order to avoid running out of GPU memory. Similar to StyleGAN2, we evaluated the
+minibatch standard deviation layer independently over the images processed by each GPU.
+Dataset augmentation We did not use dataset augmentation in any of our experiments with
+FFHQ, LSUN CAT, or CIFAR-10, except for the FFHQ-140k case and in Figure 20. In particular,
+we feel that leaky augmentations are inappropriate for CIFAR-10 given its status as a standard
+benchmark dataset, where dataset/leaky augmentations would unfairly inﬂate the results. METFACES,
+BRECAHAD, and AFHQ DOG are horizontally symmetric in nature, so we chose to enable dataset
+x-ﬂips for these datasets to maximize result quality.
+Network capacity We follow the original StyleGAN2 conﬁguration for high-resolution datasets
+(≥ 5122): a layer operating on N = w × h pixels uses min (216/√N , 512) feature maps. With
+CIFAR-10 we use 512 feature maps for all layers. In the 256 × 256 conﬁguration used with FFHQ
+and LSUN CAT, we facilitate extensive sweeps over dataset sizes by decreasing the number of
+feature maps to min (215/√N , 512).
+Learning rate and weight averaging We selected the optimal learning rates using grid search and
+found that it is generally beneﬁcial to use the highest learning rate that does not result in training
+instability. We also found that larger minibatch size allows for a slightly higher learning rate. For the
+moving average of generator weights [ 19 ], the natural choice is to parameterize the decay rate with
+respect to minibatches — not individual images — so that increasing the minibatch size results in a
+longer decay. Furthermore, we observed that a very long moving average consistently gave the best
+results on CIFAR-10. To reduce startup bias, we linearly ramp up the length parameter from 0 to
+500k over the ﬁrst 10M images.
+R1 regularization Karras et al. [ 21 ] postulated that the best choice for the R1 regularization weight
+γ is highly dependent on the dataset. We thus performed extensive grid search for each column
+7https://github.com/NVlabs/stylegan2
+8http://download.tensorflow.org/models/image/imagenet/inception-2015-12-05.tgz
+33
+in Figure 24, considering γ ∈ {0.001, 0.002, 0.005, . . . , 20, 50, 100}. Although the optimal γ does
+vary wildly, from 0.01 to 10, it seems to scale almost linearly with the resolution of the dataset. In
+practice, we have found that a good initial guess is given by γ0 = 0.0002 · N/M , where N = w × h
+is the number of pixels and M is the minibatch size. Nevertheless, the optimal value of γ tends to
+vary depending on the dataset, so we recommend experimenting with different values in the range
+γ ∈ [γ0/5, γ0 · 5].
+Mixed-precision training We utilize the high-performance Tensor Cores available in Volta-class
+GPUs by employing mixed-precision FP16/FP32 training in all of our experiments (with two ex-
+ceptions, discussed in Appendix D.2). We store the trainable parameters with full FP32 precision
+for the purposes of optimization but cast them to FP16 before evaluating G and D. The main
+challenge with mixed-precision training is that the numerical range of FP16 is limited to ∼ ±216, as
+opposed to ∼ ±2128 for FP32. Thus, any unexpected spikes in signal magnitude — no matter how
+transient — will immediately collapse the training dynamics. We found that the risk of such spikes
+can be reduced drastically using three tricks: ﬁrst, by limiting the use of FP16 to only the 4 highest
+resolutions, i.e., layers for which Nlayer ≥ Ndataset /(2 × 2)4; second, by pre-normalizing the style
+vector s and each row of the weight tensor w before applying weight modulation and demodulation9;
+and third, by clamping the output of every convolutional layer to ±28, i.e., an order of magnitude
+wider range than is needed in practice. We observed about 60% end-to-end speedup from using FP16
+and veriﬁed that the results were virtually identical to FP32 on our baseline conﬁguration.
+CIFAR-10 We enable class-conditional image generation on CIFAR-10 by extending the original
+StyleGAN2 architecture as follows. For the generator, we embed the class identiﬁer into a 512-
+dimensional vector that we concatenate with the original latent code after normalizing each, i.e.,
+z′ = concat(norm(z), norm(embed(c))), where c is the class identiﬁer. For the discriminator, we
+follow the approach of Miyato and Koyama [32] by evaluating the ﬁnal discriminator output as
+D(x) = norm(embed(c)) · D′(x)T , where D′(x) corresponds to the feature vector produced by the
+last layer of D. To compute FID, we generate 50k images using randomly selected class labels and
+compare their statistics against the 50k images from the training set. For IS, we compute the mean
+over 10 independent trials using 5k generated images per trial. As illustrated in Figures 11b and 24,
+we found that we can improve the FID considerably by disabling style mixing regularization [20 ],
+path length regularization [21 ], and residual connections in D [ 21]. Note that all of these features are
+highly beneﬁcial on higher-resolution datasets such as FFHQ. We ﬁnd it somewhat alarming that
+they have precisely the opposite effect on CIFAR-10 — this suggests that some previous conclusions
+reached in the literature using CIFAR-10 may fail to generalize to other datasets.
+D.2 Comparison methods
+We implemented the comparison methods shown in Figures 8a on top of our baseline conﬁgura-
+tion, identifying the best-performing hyperparameters for each method via extensive grid search.
+Furthermore, we inspected the resulting network weights and training dynamics in detail to verify
+correct behavior, e.g., that with the discriminator indeed learns to correctly handle the auxiliary tasks
+with PA-GAN and auxiliary rotations. We found zCR and WGAN-GP to be inherently incompatible
+with our mixed-precision training setup due to their large variation in gradient magnitudes. We
+thus reverted to full-precision FP32 for these methods. Similarly, we found lazy regularization
+to be incompatible with bCR, zCR, WGAN-GP, and auxiliary rotations. Thus, we included their
+corresponding loss terms directly into our main training loss, evaluated on every minibatch.
+bCR We implement balanced consistency regularization proposed by Zhao et al. [ 53 ] by introducing
+two new loss terms as shown in Figure 2a. We set λreal = λfake = 10 and use integer translations on
+the range of [−8, +8] pixels. In Figure 20, we also perform experiments with x-ﬂips and arbitrary
+rotations.
+zCR In addition to bCR, Zhao et al. [53 ] also propose latent consistency regularization (zCR) to
+improve the diversity of the generated images. We implement zCR by perturbing each component of
+the latent z by σnoise = 0.1 and encouraging the generator to maximize the L2 difference between the
+9Note that our pre-normalization only affects the intermediate results; it has no effect on the ﬁnal output of
+the convolution layer due to the subsequent post-normalization performed by weight demodulation.
+34
+generated images, measured as an average over the pixels, with weight λgen = 0.02. Similarly, we
+encourage the discriminator to minimize the L2 difference in D(x) with weight λdis = 0.2.
+PA-GAN Zhang and Khoreva [48] propose to reduce overﬁtting by requiring the discriminator
+to learn an auxiliary checksum task. This is done by providing a random bit string as additional
+input to D, requiring that the sign of the output is ﬂipped based on the parity of bits that were set,
+and dynamically increasing the number of bits when overﬁtting is detected. We select the number
+of bits using our rt heuristic with target 0.95. Given the value of p produced by the heuristic, we
+calculate the number of bits as k = dp · 16e. Similar to Zhang and Khoreva, we fade in the effect
+of newly added bits smoothly over the course of training. In practice, we use a ﬁxed string of
+16 bits, where the ﬁrst k − 1 bits are sampled from Bernoulli(0.5), the kth bit is sampled from
+Bernoulli(min(p · 16 − k + 1, 0.5)), and the remaining 16 − k bits are set to zero.
+WGAN-GP For WGAN-GP, proposed by Gulrajani et al. [15 ], we reuse the existing implementa-
+tion included in the StyleGAN2 codebase with λ = 10. We found WGAN-GP to be quite unstable
+in our baseline conﬁguration, which necessitated us to disable mixed-precision training and lazy
+regularization, as well as to settle for a considerably lower learning rate η = 0.0010.
+Auxiliary rotations Chen et al. [6] propose to improve GAN training by introducing an auxiliary
+rotation loss for G and D. In addition the main training objective, the discriminator is shown real
+images augmented with 90◦ rotations and asked to detect their correct orientation. Similarly, the
+generator is encouraged to produce images whose orientation is easy for the discriminator to detect
+correctly. We implement this method by introducing two new loss terms that are evaluated on a 4×
+larger minibatch, consisting of rotated versions of the images shown to the discriminator as a part of
+the main loss. We extend the last layer of D to output 5 scalar values instead of one and interpret the
+last 4 components as raw logits for softmax cross-entropy loss. We weight the additional loss terms
+using α = 10 for G, and β = 5 for D.
+Spectral normalization Miyato et al. [ 31] propose to regularize the discriminator by explicitly
+enforcing an upper bound for its Lipschitz constant, and several follow-up works [49, 5, 53, 38] have
+found it to be beneﬁcial. Given that spectral normalization is effectively a no-op when applied to
+the StyleGAN2 generator [ 21 ], we apply it only to the discriminator. We ported the original Chainer
+implementation10 to TensorFlow, and applied it to the main convolution layers of D. We found it
+beneﬁcial to not use spectral normalization with the FromRGB layer, residual skip connections, or the
+last fully-connected layer.
+Freeze-D Mo et al. [33 ] propose to freeze the ﬁrst k layers of the discriminator to improve results
+with transfer learning. We tested several different choices for k; the best results were given by k = 10
+in Figure 9 and by k = 13 in Figure 11b. In practice, this corresponds to freezing all layers operating
+at the 3 or 4 highest resolutions, respectively.
+BigGAN BigGAN results in Figures 19 and 18 were run on a modiﬁed version of the original
+BigGAN PyTorch implementation11. The implementation was adapted for unconditional operation
+following Schönfeld et al. [ 38 ] by matching their hyperparameters, replacing class-conditional
+BatchNorm with self-modulation, where the BatchNorm parameters are conditioned only on the
+latent vector z, and not using class projection in the discriminator.
+Mapping network depth For the “Shallow mapping” case in Figure 8a, we reduced the depth of
+the mapping network from 8 to 2. Reducing the depth further than 2 yielded consistently inferior
+results, conﬁrming the usefulness of the mapping network. In general, we found depth 2 to yield
+slightly better results than depth 8, making it a good default choice for future work.
+Adaptive dropout Dropout [42 ] is a well-known technique for combating overﬁtting in practically
+all areas of machine learning. In Figure 8a, we employ multiplicative Gaussian dropout for all layers
+of the discriminator, similar to the approach employed by Karras et al. [ 19] in the context of LSGAN
+10https://github.com/pfnet-research/sngan_projection
+11https://github.com/ajbrock/BigGAN-PyTorch
+35
+loss [ 28]. We adjust the standard deviation dynamically using our rt heuristic with target 0.6, so that
+the resulting p is used directly as the value for σ.
+D.3 MetFaces dataset
+We have collected a new dataset, MetFaces, by extracting images of human faces from the Metropoli-
+tan Museum of Art online collection. Dataset images were searched using terms such as ‘paintings’,
+‘watercolor’ and ‘oil on canvas’, and downloaded via the https://metmuseum.github.io/ API. This
+resulted in a set of source images that depicted paintings, drawings, and statues. Various automated
+heuristics, such as face detection and image quality metrics, were used to narrow down the set
+of images to contain only human faces. A manual selection pass over the remaining images was
+performed to weed out poor quality images not caught by automated ﬁltering. Finally, faces were
+cropped and aligned to produce 1,336 high quality images at 10242 resolution.
+The whole dataset, including the unprocessed images, is available at
+https://github.com/NVlabs/metfaces-dataset
+E Energy consumption
+Computation is a core resource in any machine learning project: its availability and cost, as well as
+the associated energy consumption, are key factors in both choosing research directions and practical
+adoption. We provide a detailed breakdown for our entire project in Table 25 in terms of both GPU
+time and electricity consumption. We report expended computational effort as single-GPU years
+(Volta class GPU). We used a varying number of NVIDIA DGX-1s for different stages of the project,
+and converted each run to single-GPU equivalents by simply scaling by the number of GPUs used.
+We followed the Green500 power measurements guidelines [12 ] similarly to Karras et al. [21]. The
+entire project consumed approximately 300 megawatt hours (MWh) of electricity. Almost half of
+the total energy was spent on exploration and shaping the ideas before the actual paper production
+started. Subsequently the majority of computation was targeted towards the extensive sweeps shown
+in various ﬁgures. Given that ADA does not signiﬁcantly affect the cost of training a single model,
+e.g., training StyleGAN2 [21] with 1024 × 1024 FFHQ still takes approximately 0.7 MWh.
+36
+Item Number of GPU years Electricity
+training runs (Volta) (MWh)
+Early exploration 253 22.65 52.05
+Paper exploration 1116 36.54 87.39
+Setting up the baselines 251 12.19 30.70
+Paper ﬁgures 960 50.53 108.02
+Fig.1 Baseline convergence 21 1.01 2.27
+Fig.3 Leaking behavior 78 3.62 7.93
+Fig.4 Augmentation categories 90 4.45 9.40
+Fig.5 ADA heuristics 61 3.16 6.87
+Fig.6 ADA convergence 15 0.78 1.70
+Fig.7 Training set sweeps 174 10.82 22.70
+Fig.8a Comparison methods 69 4.18 8.64
+Fig.8b Discriminator capacity 144 7.70 15.93
+Fig.9 Transfer learning 40 0.71 1.67
+Fig.11a Small datasets 30 1.71 4.15
+Fig.11b CIFAR-10 30 0.93 2.71
+Fig.19 BigGAN comparison 54 3.34 7.12
+Fig.20 bCR leaks 40 2.19 4.57
+Fig.21 Cumulative augmentations 114 5.93 12.36
+Results intentionally left out 177 5.51 11.78
+Wasted due to technical issues 255 3.86 8.39
+Code release 375 12.49 26.71
+Total 3387 143.76 325.06
+Figure 25: Computational effort expenditure and electricity consumption data for this project. The unit
+for computation is GPU-years on a single NVIDIA V100 GPU — it would have taken approximately
+135 years to execute this project using a single GPU. See the text for additional details about the
+computation and energy consumption estimates. Early exploration includes all training runs that
+affected our decision to start this project. Paper exploration includes all training runs that were done
+speciﬁcally for this project, but were not intended to be used in the paper as-is. Setting up the baselines
+includes all hyperparameter tuning for the baselines. Figures provides a per-ﬁgure breakdown, and
+underlines that just reproducing all the ﬁgures would require over 50 years of computation on a single
+GPU. Results intentionally left out includes additional results that were initially planned, but then left
+out to improve focus and clarity. Wasted due to technical issues includes computation wasted due
+to code bugs and infrastructure issues. Code release covers testing and benchmarking related to the
+public release.

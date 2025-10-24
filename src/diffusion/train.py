@@ -55,6 +55,7 @@ class DiffusionTrainingConfig:
     eval_classifier: bool = True
     classifier_samples: int = 2048
     classifier_steps: int = 50
+    min_snr_gamma: Optional[float] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.betas, tuple):

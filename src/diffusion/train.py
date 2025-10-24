@@ -337,10 +337,20 @@ def main(cfg: DictConfig) -> None:
                 xt, noise = q_sample(schedule, sequences, timesteps, noise=noise)
                 alpha, sigma = schedule.coefficients(timesteps, device=device)
                 v_target = compute_v(sequences, noise, alpha, sigma)
+                sqrt_alpha_bar = alpha
+                sigma_broadcast = sigma
 
                 preds = model(xt.permute(0, 2, 1), timesteps, cond=cond, mask=mask)
                 preds = preds.permute(0, 2, 1)
-                loss = masked_mse(preds, v_target, mask)
+                weights = None
+                if training_cfg.min_snr_gamma is not None and training_cfg.min_snr_gamma > 0:
+                    log_snr = schedule.log_snr_at(timesteps, device=device)
+                    weights = _min_snr_weight(log_snr, training_cfg.min_snr_gamma)
+                loss = masked_mse(preds, v_target, mask, weights=weights)
+                if global_step % training_cfg.log_interval == 0:
+                    print(
+                        f"debug step={global_step} mask_sum={mask.sum().item():.0f} v_std={v_target.std().item():.4f}"
+                    )
 
             scaler.scale(loss).backward()
             if training_cfg.grad_clip > 0:

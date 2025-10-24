@@ -7,7 +7,7 @@ import copy
 import torch
 
 
-def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor, *, weights: Optional[torch.Tensor] = None) -> torch.Tensor:
     """Compute mean squared error on masked sequences."""
     if pred.shape != target.shape:
         raise ValueError("Pred and target must have the same shape.")
@@ -16,10 +16,14 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     if pred.ndim != 3:
         raise ValueError("Pred/target tensors must be 3D [B, T, C].")
     mask = mask.to(dtype=pred.dtype)
-    masked_diff = (pred - target) ** 2
-    masked_diff = masked_diff * mask.unsqueeze(-1)
+    errors = (pred - target) ** 2
+    if weights is not None:
+        while weights.ndim < errors.ndim:
+            weights = weights.unsqueeze(-1)
+        errors = errors * weights
+    errors = errors * mask.unsqueeze(-1)
     denom = (mask.sum() * pred.shape[-1]).clamp_min(1.0)
-    return masked_diff.sum() / denom
+    return errors.sum() / denom
 
 
 def infer_mask_from_deltas(deltas: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:

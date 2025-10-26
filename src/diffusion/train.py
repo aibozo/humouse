@@ -56,6 +56,7 @@ class DiffusionTrainingConfig:
     classifier_samples: int = 2048
     classifier_steps: int = 50
     min_snr_gamma: Optional[float] = None
+    objective: str = "v"  # options: "v", "epsilon"
 
     def __post_init__(self) -> None:
         if not isinstance(self.betas, tuple):
@@ -221,6 +222,15 @@ def _diffusion_classifier_metrics(
     return {"c2st_accuracy": accuracy, "c2st_auc": auc}
 
 
+def _min_snr_weight(log_snr: torch.Tensor, gamma: float) -> torch.Tensor:
+    gamma = float(gamma)
+    if gamma <= 0:
+        return torch.ones_like(log_snr)
+    snr = log_snr.exp()
+    weight = (gamma + snr) / (snr + 1)
+    return weight
+
+
 def save_checkpoint(
     path: Path,
     *,
@@ -337,20 +347,23 @@ def main(cfg: DictConfig) -> None:
             with autocast(enabled=scaler.is_enabled()):
                 xt, noise = q_sample(schedule, sequences, timesteps, noise=noise)
                 alpha, sigma = schedule.coefficients(timesteps, device=device)
-                v_target = compute_v(sequences, noise, alpha, sigma)
-                sqrt_alpha_bar = alpha
-                sigma_broadcast = sigma
 
                 preds = model(xt.permute(0, 2, 1), timesteps, cond=cond, mask=mask)
                 preds = preds.permute(0, 2, 1)
+
+                if training_cfg.objective.lower() == "epsilon":
+                    target = noise
+                else:
+                    target = compute_v(sequences, noise, alpha, sigma)
+
                 weights = None
-                if training_cfg.min_snr_gamma is not None and training_cfg.min_snr_gamma > 0:
+                if training_cfg.min_snr_gamma not in (None, 0):
                     log_snr = schedule.log_snr_at(timesteps, device=device)
                     weights = _min_snr_weight(log_snr, training_cfg.min_snr_gamma)
-                loss = masked_mse(preds, v_target, mask, weights=weights)
+                loss = masked_mse(preds, target, mask, weights=weights)
                 if global_step % training_cfg.log_interval == 0:
                     print(
-                        f"debug step={global_step} mask_sum={mask.sum().item():.0f} v_std={v_target.std().item():.4f}"
+                        f"debug step={global_step} mask_sum={mask.sum().item():.0f} target_std={target.std().item():.4f}"
                     )
 
             scaler.scale(loss).backward()

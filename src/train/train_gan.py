@@ -31,6 +31,7 @@ from models.generator import ConditionalGenerator, GeneratorConfig
 from models.gan_lstm import LSTMGenerator, LSTMDiscriminator
 from models.seq2seq import Seq2SeqEncoder, Seq2SeqGenerator
 from eval.sigma_log_baseline import run_baseline
+from diffusion.utils import match_time_channel
 from train.config_schemas import (
     DataConfig,
     GanExperimentConfig,
@@ -451,6 +452,7 @@ def _build_experiment_config(cfg: DictConfig) -> tuple[GanExperimentConfig, Dict
         gradient_penalty_weight=training_section["gradient_penalty_weight"],
         discriminator_steps=training_section["discriminator_steps"],
         log_interval=training_section["log_interval"],
+        metric_log_interval=training_section.get("metric_log_interval"),
         sample_interval=training_section["sample_interval"],
         replay_buffer_path=training_section.get("replay_buffer_path", "checkpoints/gan/replay_buffer.pt"),
         replay_samples_per_epoch=training_section.get("replay_samples_per_epoch", 256),
@@ -467,6 +469,7 @@ def _build_experiment_config(cfg: DictConfig) -> tuple[GanExperimentConfig, Dict
         sigma_eval_samples=training_section.get("sigma_eval_samples", 512),
         sigma_eval_dataset_id=training_section.get("sigma_eval_dataset_id"),
         sigma_eval_max_gestures=training_section.get("sigma_eval_max_gestures", 4096),
+        sigma_eval_make_plots=training_section.get("sigma_eval_make_plots", True),
         absolute_coordinates=training_section.get("absolute_coordinates", False),
         generator_init_path=training_section.get("generator_init_path"),
         curvature_match_weight=training_section.get("curvature_match_weight", 0.0),
@@ -495,6 +498,29 @@ def _build_experiment_config(cfg: DictConfig) -> tuple[GanExperimentConfig, Dict
         adaptive_freeze_cooldown=training_section.get("adaptive_freeze_cooldown", 0),
         adaptive_freeze_freeze_generator=training_section.get("adaptive_freeze_freeze_generator", True),
         fake_batch_ratio=training_section.get("fake_batch_ratio", 0.5),
+        fake_batch_ratio_start=training_section.get("fake_batch_ratio_start", 0.2),
+        fake_batch_ratio_warmup=training_section.get("fake_batch_ratio_warmup", 50),
+        ada_enabled=training_section.get("ada_enabled", False),
+        ada_target=training_section.get("ada_target", 0.6),
+        ada_interval=training_section.get("ada_interval", 16),
+        ada_rate=training_section.get("ada_rate", 0.05),
+        ada_p_init=training_section.get("ada_p_init", 0.0),
+        ada_p_max=training_section.get("ada_p_max", 0.9),
+        adaptive_lr_enabled=training_section.get("adaptive_lr_enabled", False),
+        adaptive_lr_target=training_section.get("adaptive_lr_target", 0.75),
+        adaptive_lr_warmup=training_section.get("adaptive_lr_warmup", 0),
+        adaptive_lr_error_gain=training_section.get("adaptive_lr_error_gain", 2.0),
+        adaptive_lr_derivative_gain=training_section.get("adaptive_lr_derivative_gain", 1.0),
+        adaptive_lr_min=training_section.get("adaptive_lr_min", 1e-6),
+        adaptive_lr_max=training_section.get("adaptive_lr_max", 2e-4),
+        diffusion_eval_enabled=training_section.get("diffusion_eval_enabled", False),
+        diffusion_eval_checkpoint=training_section.get("diffusion_eval_checkpoint"),
+        diffusion_eval_samples=training_section.get("diffusion_eval_samples", 512),
+        diffusion_eval_steps=training_section.get("diffusion_eval_steps", 50),
+        diffusion_eval_eta=training_section.get("diffusion_eval_eta", 0.0),
+        diffusion_eval_seq_len=training_section.get("diffusion_eval_seq_len"),
+        diffusion_eval_interval=training_section.get("diffusion_eval_interval", 1),
+        diffusion_eval_log_dir=training_section.get("diffusion_eval_log_dir", "diffusion_eval"),
     )
     logging_cfg = LoggingConfig(**cfg_dict["logging"])
 
@@ -952,17 +978,32 @@ def _run_diffusion_evaluation(
     elif generated.size(-1) > target_dim:
         generated = generated[..., :target_dim]
 
+    real_time_ref = _sample_real_time_sequences(
+        dataset,
+        generated.size(0),
+        generated.size(1),
+        seed=experiment_cfg.seed + epoch,
+    )
+    if real_time_ref is not None:
+        generated = match_time_channel(
+            generated,
+            real_time_ref.to(device=generated.device, dtype=generated.dtype),
+        )
+
     if experiment_cfg.data.canonicalize_path or experiment_cfg.data.canonicalize_duration:
         generated = _canonicalize_tensor_sequences(generated, experiment_cfg.data)
 
-    denorm_sequences = dataset.denormalize_sequences(generated.detach().cpu())
+    normalized_sequences = generated.detach().cpu()
+    denorm_sequences = dataset.denormalize_sequences(normalized_sequences)
     denorm_np = denorm_sequences.numpy()
 
     fake_feature_tensors: list[torch.Tensor] = []
+    fake_feature_raw: list[torch.Tensor] = []
     for seq in denorm_sequences:
-        feat = compute_features_from_sequence(seq)
-        feat = dataset.normalize_features(feat)
-        fake_feature_tensors.append(feat)
+        feat_raw = compute_features_from_sequence(seq)
+        feat_norm = dataset.normalize_features(feat_raw)
+        fake_feature_raw.append(feat_raw)
+        fake_feature_tensors.append(feat_norm)
 
     if not fake_feature_tensors:
         logger.warning("Diffusion evaluation could not compute any features from generated samples.")
@@ -1007,10 +1048,28 @@ def _run_diffusion_evaluation(
     eval_dir.mkdir(parents=True, exist_ok=True)
 
     sequences_path = eval_dir / "diffusion_samples.npz"
-    np.savez_compressed(sequences_path, sequences=denorm_np)
+    seq_mean, seq_std = dataset.get_sequence_stats()
+    np.savez_compressed(
+        sequences_path,
+        sequences=denorm_np,
+        sequences_denorm=denorm_np,
+        sequences_norm=normalized_sequences.numpy(),
+        sequence_mean=seq_mean.cpu().numpy(),
+        sequence_std=seq_std.cpu().numpy(),
+        normalize_sequences=dataset.config.normalize_sequences,
+    )
 
     features_path = eval_dir / "diffusion_features.npz"
-    np.savez_compressed(features_path, features=fake_np)
+    feat_mean, feat_std = dataset.get_feature_stats()
+    np.savez_compressed(
+        features_path,
+        features=fake_np,
+        features_norm=fake_np,
+        features_denorm=torch.stack(fake_feature_raw).numpy(),
+        feature_mean=feat_mean.cpu().numpy(),
+        feature_std=feat_std.cpu().numpy(),
+        normalize_features=dataset.config.normalize_features,
+    )
 
     summary = {
         "epoch": epoch,
@@ -1044,6 +1103,31 @@ def _run_diffusion_evaluation(
     )
 
     return summary
+
+
+def _sample_real_time_sequences(
+    dataset: GestureDataset,
+    count: int,
+    seq_len: int,
+    *,
+    seed: int,
+) -> Optional[torch.Tensor]:
+    """Draw positive real gestures and return tensor for borrowing Δt channels."""
+    positives: list[torch.Tensor] = []
+    for seq, _, label in dataset.samples:
+        if label.item() >= 0.5:
+            positives.append(seq)
+    if not positives:
+        return None
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(len(positives), size=count, replace=True)
+    channels = positives[0].size(-1)
+    stacked = torch.zeros(count, seq_len, channels, dtype=positives[0].dtype)
+    for out_idx, src_idx in enumerate(idx):
+        seq = positives[src_idx].detach().cpu()
+        length = min(seq.size(0), seq_len)
+        stacked[out_idx, :length, : seq.size(-1)] = seq[:length]
+    return stacked
 
 
 def _diffusion_classifier_metrics(real_np: np.ndarray, fake_np: np.ndarray, *, seed: int) -> dict[str, float]:

@@ -10,6 +10,7 @@ from .schedule import (
     eps_from_v,
     q_sample,
     v_from_eps,
+    x0_from_eps,
     x0_from_v,
 )
 
@@ -20,6 +21,7 @@ __all__ = [
     "q_sample",
     "compute_v",
     "x0_from_v",
+    "x0_from_eps",
     "eps_from_v",
     "v_from_eps",
 ]

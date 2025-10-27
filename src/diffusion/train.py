@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field, asdict, fields
 from pathlib import Path
@@ -20,11 +21,11 @@ import numpy as np
 
 from diffusion.data import DiffusionDataConfig, create_dataloader
 from diffusion.models import UNet1D, UNet1DConfig
-from diffusion.noise import DiffusionScheduleConfig, build_schedule, compute_v, q_sample
-from diffusion.utils import EMAModel, masked_mse
+from diffusion.noise import DiffusionScheduleConfig, build_schedule, compute_v, q_sample, x0_from_eps, x0_from_v
+from diffusion.utils import EMAModel, masked_mse, match_time_channel
 from diffusion.augment import apply_default_augmentations
 from diffusion.sample import DiffusionSampler
-from features import compute_features_from_sequence
+from features import FEATURE_SPECS, compute_features_from_sequence
 from utils.logging import CSVMetricLogger
 
 from sklearn.linear_model import LogisticRegression
@@ -57,6 +58,11 @@ class DiffusionTrainingConfig:
     classifier_steps: int = 50
     min_snr_gamma: Optional[float] = None
     objective: str = "v"  # options: "v", "epsilon"
+    summary_path: Optional[str] = None
+    sample_eval_count: int = 256
+    sample_eval_steps: int = 50
+    scale_reg_weight: float = 0.0
+    scale_reg_channels: Optional[list[int]] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.betas, tuple):
@@ -76,6 +82,15 @@ class DiffusionExperimentConfig:
 def _filter_kwargs(datatype, data: dict) -> dict:
     valid = {f.name for f in fields(datatype)}
     return {k: v for k, v in (data or {}).items() if k in valid}
+
+
+def _masked_channel_std(tensor: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    valid = mask.to(dtype=tensor.dtype).unsqueeze(-1)
+    count = valid.sum(dim=(0, 1)).clamp_min(1.0)
+    mean = (tensor * valid).sum(dim=(0, 1)) / count
+    centered = tensor - mean.view(1, 1, -1)
+    var = ((centered**2) * valid).sum(dim=(0, 1)) / count
+    return torch.sqrt(var + 1e-6)
 
 
 def _load_experiment_config(cfg: DictConfig) -> DiffusionExperimentConfig:
@@ -125,29 +140,83 @@ def evaluate(
     device: torch.device,
     in_channels: int,
     cond_dim: int,
+    objective: str,
+    stats_dataset=None,
 ) -> float:
     model.eval()
     total_loss = 0.0
     total_weight = 0.0
+    mask_total = 0.0
+    target_std_total = 0.0
+    batches = 0
+    obj = objective.lower().strip()
     for batch in data_loader:
-        sequences = _prepare_sequences(batch["sequences"].to(device), target_channels=in_channels)
+        raw_sequences = batch["sequences"].to(device)
+        raw_features = batch["features"].to(device)
+        source_dataset = getattr(data_loader, "dataset", None)
+        if stats_dataset is not None and source_dataset is not None and source_dataset is not stats_dataset:
+            denorm_seq = source_dataset.denormalize_sequences(raw_sequences)
+            norm_seq = stats_dataset.normalize_sequences(denorm_seq)
+            raw_sequences = norm_seq
+            denorm_feat = source_dataset.denormalize_features(raw_features)
+            norm_feat = stats_dataset.normalize_features(denorm_feat)
+            raw_features = norm_feat
+        sequences = _prepare_sequences(raw_sequences, target_channels=in_channels)
+        features = raw_features
         mask = batch["mask"].to(device)
-        cond = _prepare_features(batch["features"].to(device), cond_dim)
+        cond = _prepare_features(features, cond_dim)
         timesteps = torch.randint(0, schedule.timesteps, (sequences.size(0),), device=device)
         noise = torch.randn_like(sequences)
         xt, noise = q_sample(schedule, sequences, timesteps, noise=noise)
         alpha, sigma = schedule.coefficients(timesteps, device=device)
-        v_target = compute_v(sequences, noise, alpha, sigma)
+        if obj == "epsilon":
+            target = noise
+        else:
+            target = compute_v(sequences, noise, alpha, sigma)
 
         preds = model(xt.permute(0, 2, 1), timesteps, cond=cond, mask=mask)
         preds = preds.permute(0, 2, 1)
-        loss = masked_mse(preds, v_target, mask)
+        loss = masked_mse(preds, target, mask)
         weight = float(mask.sum().item() * sequences.shape[-1])
         total_loss += float(loss.item()) * max(weight, 1.0)
         total_weight += max(weight, 1.0)
+        mask_total += mask.sum().item()
+        target_std_total += float(target.std().item())
+        batches += 1
     if total_weight == 0.0:
         return 0.0
+    avg_mask = mask_total / batches if batches else 0.0
+    avg_target_std = target_std_total / batches if batches else 0.0
+    logger.info(
+        "Validation stats: avg_mask_sum=%.1f avg_target_std=%.4f",
+        avg_mask,
+        avg_target_std,
+    )
     return total_loss / total_weight
+
+
+def _sample_positive_sequences(source_dataset, limit: int, rng: Optional[np.random.Generator] = None) -> list[torch.Tensor]:
+    if limit <= 0:
+        return []
+    reservoir: list[torch.Tensor] = []
+    seen = 0
+    for seq_tensor, _, label in source_dataset.samples:
+        if label.item() < 0.5:
+            continue
+        seq_cpu = seq_tensor.detach().cpu()
+        if rng is None:
+            reservoir.append(seq_cpu)
+            if len(reservoir) >= limit:
+                break
+            continue
+        seen += 1
+        if len(reservoir) < limit:
+            reservoir.append(seq_cpu)
+        else:
+            idx = int(rng.integers(0, seen))
+            if idx < limit:
+                reservoir[idx] = seq_cpu
+    return reservoir
 
 
 def _diffusion_classifier_metrics(
@@ -158,14 +227,49 @@ def _diffusion_classifier_metrics(
     seq_len: int,
     steps: int,
     seed: int,
+    real_dataset=None,
+    real_label: str = "val",
 ) -> dict[str, float]:
-    real_tensor = dataset.get_positive_features_tensor(use_full=True)
-    if real_tensor.numel() == 0:
+    return _diffusion_classifier_metrics_with_val(
+        dataset,
+        real_dataset=real_dataset or dataset,
+        sampler=sampler,
+        samples=samples,
+        seq_len=seq_len,
+        steps=steps,
+        seed=seed,
+        real_label=real_label,
+    )
+
+
+def _diffusion_classifier_metrics_with_val(
+    dataset,
+    *,
+    real_dataset,
+    sampler: DiffusionSampler,
+    samples: int,
+    seq_len: int,
+    steps: int,
+    seed: int,
+    real_label: str,
+) -> dict[str, float]:
+    rng = np.random.default_rng(seed)
+
+    real_sequences = _sample_positive_sequences(real_dataset, samples, rng=rng)
+    if len(real_sequences) < 40:
         return {}
-    real_np = real_tensor.cpu().numpy()
-    num_samples = int(min(samples, real_np.shape[0]))
-    if num_samples < 40:
+    num_samples = min(samples, len(real_sequences))
+
+    real_batch = torch.stack(real_sequences[:num_samples])
+    real_denorm = real_dataset.denormalize_sequences(real_batch)
+    real_features: list[torch.Tensor] = []
+    for seq in real_denorm:
+        feat = compute_features_from_sequence(seq)
+        feat = dataset.normalize_features(feat)
+        real_features.append(feat)
+    if not real_features:
         return {}
+    real_np = torch.stack(real_features).numpy()
 
     steps = max(1, min(steps, sampler.schedule.timesteps))
     fake = sampler.sample(num_samples, seq_len, steps=steps)
@@ -179,6 +283,7 @@ def _diffusion_classifier_metrics(
     elif fake.size(-1) > target_dim:
         fake = fake[..., :target_dim]
     fake_denorm = dataset.denormalize_sequences(fake.cpu())
+    fake_denorm = match_time_channel(fake_denorm, real_denorm)
     fake_features: list[torch.Tensor] = []
     for seq in fake_denorm:
         feat = compute_features_from_sequence(seq)
@@ -187,6 +292,13 @@ def _diffusion_classifier_metrics(
     if not fake_features:
         return {}
     fake_np = torch.stack(fake_features).numpy()
+
+    delta = fake_np.mean(axis=0) - real_np.mean(axis=0)
+    delta_abs = np.abs(delta)
+    feature_delta_mean = float(delta_abs.mean())
+    feature_delta_max = float(delta_abs.max())
+
+    _log_feature_stats(real_np, fake_np, real_label)
 
     feature_dim = min(real_np.shape[1], fake_np.shape[1])
     real_np = real_np[:num_samples, :feature_dim]
@@ -219,7 +331,84 @@ def _diffusion_classifier_metrics(
     accuracy = float(clf.score(X_test, y_test))
     proba = clf.predict_proba(X_test)[:, 1]
     auc = float(roc_auc_score(y_test, proba))
-    return {"c2st_accuracy": accuracy, "c2st_auc": auc}
+    return {
+        "c2st_accuracy": accuracy,
+        "c2st_auc": auc,
+        "feature_delta_mean": feature_delta_mean,
+        "feature_delta_max": feature_delta_max,
+    }
+
+
+def _log_feature_stats(real_np: np.ndarray, fake_np: np.ndarray, real_label: str) -> None:
+    if real_np.size == 0 or fake_np.size == 0:
+        return
+    real_mean = real_np.mean(axis=0)
+    fake_mean = fake_np.mean(axis=0)
+    real_std = real_np.std(axis=0)
+    fake_std = fake_np.std(axis=0)
+    delta = fake_mean - real_mean
+    feature_names = [spec.name for spec in FEATURE_SPECS]
+    topk = np.argsort(np.abs(delta))[-5:][::-1]
+    parts = []
+    for idx in topk:
+        name = feature_names[idx] if idx < len(feature_names) else f"feat_{idx}"
+        parts.append(
+            f"{name}: μ_real={real_mean[idx]:+.3f}, μ_fake={fake_mean[idx]:+.3f}, Δμ={delta[idx]:+.3f}, σ_real={real_std[idx]:+.3f}, σ_fake={fake_std[idx]:+.3f}"
+        )
+    logger.info("C2ST (%s real) top |Δμ| features: %s", real_label, "; ".join(parts))
+
+
+def _compute_sample_stats(
+    sampler: DiffusionSampler,
+    dataset,
+    *,
+    sample_count: int,
+    seq_len: int,
+    steps: int,
+) -> dict[str, object]:
+    sample_count = min(sample_count, len(dataset))
+    if sample_count <= 0:
+        return {}
+    real_sequences = _sample_positive_sequences(dataset, sample_count)
+    if not real_sequences:
+        return {}
+    num = min(sample_count, len(real_sequences))
+    real_batch = torch.stack(real_sequences[:num])
+    real_norm_std = real_batch.std(dim=(0, 1))
+    real_denorm = dataset.denormalize_sequences(real_batch)
+    real_denorm_std = real_denorm.std(dim=(0, 1))
+
+    fake = sampler.sample(num, seq_len, steps=steps).detach().cpu()
+    target_dim = dataset.samples[0][0].size(-1) if dataset.samples else fake.size(-1)
+    if fake.size(-1) < target_dim:
+        pad_dim = target_dim - fake.size(-1)
+        pad = torch.zeros(fake.size(0), fake.size(1), pad_dim)
+        pad[..., 0] = 1.0 / max(seq_len, 1)
+        fake = torch.cat([fake, pad], dim=-1)
+    fake = match_time_channel(fake, real_batch)
+    fake_norm_std = fake.std(dim=(0, 1))
+    fake_denorm = dataset.denormalize_sequences(fake)
+    fake_denorm_std = fake_denorm.std(dim=(0, 1))
+
+    def _tensor_to_list(t: torch.Tensor) -> list[float]:
+        return [float(x) for x in t.tolist()]
+
+    return {
+        "sample_norm_std": _tensor_to_list(fake_norm_std),
+        "sample_norm_std_mean": float(fake_norm_std.mean().item()),
+        "sample_denorm_std": _tensor_to_list(fake_denorm_std),
+        "sample_denorm_std_mean": float(fake_denorm_std.mean().item()),
+        "real_norm_std": _tensor_to_list(real_norm_std),
+        "real_norm_std_mean": float(real_norm_std.mean().item()),
+        "real_denorm_std": _tensor_to_list(real_denorm_std),
+        "real_denorm_std_mean": float(real_denorm_std.mean().item()),
+    }
+
+
+def _write_summary(summary_path: Path, payload: dict) -> None:
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    with summary_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
 
 
 def _min_snr_weight(log_snr: torch.Tensor, gamma: float) -> torch.Tensor:
@@ -297,6 +486,24 @@ def main(cfg: DictConfig) -> None:
         except ValueError:
             val_loader = None
 
+    seq_target_std = train_loader.dataset.get_sequence_stats()[1]
+    if data_cfg.normalize_sequences:
+        scale_target_std = torch.ones_like(seq_target_std)
+    else:
+        scale_target_std = seq_target_std
+    if scale_target_std.numel() > model_cfg.in_channels:
+        scale_target_std = scale_target_std[: model_cfg.in_channels]
+    elif scale_target_std.numel() < model_cfg.in_channels:
+        pad = model_cfg.in_channels - scale_target_std.numel()
+        scale_target_std = torch.cat([scale_target_std, scale_target_std.new_ones(pad)])
+    if training_cfg.scale_reg_channels:
+        mask = torch.zeros_like(scale_target_std, dtype=torch.bool)
+        for idx in training_cfg.scale_reg_channels:
+            if 0 <= idx < mask.numel():
+                mask[idx] = True
+        scale_target_std = torch.where(mask, scale_target_std, torch.ones_like(scale_target_std))
+    scale_target_std = scale_target_std.to(device)
+
     model = UNet1D(model_cfg).to(device)
     schedule = build_schedule(diffusion_cfg, device=device)
     optimizer = torch.optim.AdamW(
@@ -314,14 +521,26 @@ def main(cfg: DictConfig) -> None:
         cond_dim=model_cfg.cond_dim,
         in_channels=model_cfg.in_channels,
         self_condition=model_cfg.self_condition,
+        objective=training_cfg.objective,
     )
     classifier_logger = None
     if training_cfg.eval_classifier:
         clf_path = Path(to_absolute_path(training_cfg.checkpoint_dir)) / "diffusion_classifier_metrics.csv"
         classifier_logger = CSVMetricLogger(
             clf_path,
-            fieldnames=["epoch", "c2st_accuracy", "c2st_auc"],
+            fieldnames=[
+                "epoch",
+                "c2st_val_accuracy",
+                "c2st_val_auc",
+                "c2st_train_accuracy",
+                "c2st_train_auc",
+            ],
         )
+
+    best_val_loss = float("inf")
+    last_val_loss: Optional[float] = None
+    val_metrics: dict[str, float] = {}
+    train_metrics: dict[str, float] = {}
 
     global_step = 0
     for epoch in range(1, training_cfg.epochs + 1):
@@ -351,16 +570,24 @@ def main(cfg: DictConfig) -> None:
                 preds = model(xt.permute(0, 2, 1), timesteps, cond=cond, mask=mask)
                 preds = preds.permute(0, 2, 1)
 
-                if training_cfg.objective.lower() == "epsilon":
+                obj = training_cfg.objective.lower()
+                if obj == "epsilon":
                     target = noise
+                    x0_hat = x0_from_eps(xt, preds, alpha, sigma)
                 else:
                     target = compute_v(sequences, noise, alpha, sigma)
+                    x0_hat = x0_from_v(xt, preds, alpha, sigma)
 
                 weights = None
                 if training_cfg.min_snr_gamma not in (None, 0):
                     log_snr = schedule.log_snr_at(timesteps, device=device)
                     weights = _min_snr_weight(log_snr, training_cfg.min_snr_gamma)
                 loss = masked_mse(preds, target, mask, weights=weights)
+                if training_cfg.scale_reg_weight > 0:
+                    std_hat = _masked_channel_std(x0_hat, mask)
+                    target_std = scale_target_std.to(device=std_hat.device, dtype=std_hat.dtype)
+                    scale_penalty = torch.mean((std_hat - target_std) ** 2)
+                    loss = loss + training_cfg.scale_reg_weight * scale_penalty
                 if global_step % training_cfg.log_interval == 0:
                     print(
                         f"debug step={global_step} mask_sum={mask.sum().item():.0f} target_std={target.std().item():.4f}"
@@ -402,12 +629,29 @@ def main(cfg: DictConfig) -> None:
                 device=device,
                 in_channels=model_cfg.in_channels,
                 cond_dim=model_cfg.cond_dim,
+                objective=training_cfg.objective,
+                stats_dataset=train_loader.dataset,
             )
+            last_val_loss = val_loss
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
             logger.info("Epoch %d validation loss (EMA): %.6f", epoch, val_loss)
             classifier_metrics = {}
             if training_cfg.eval_classifier:
                 classifier_metrics = _diffusion_classifier_metrics(
                     dataset=train_loader.dataset,
+                    real_dataset=val_loader.dataset,
+                    real_label="val",
+                    sampler=ema_sampler,
+                    samples=training_cfg.classifier_samples,
+                    seq_len=data_cfg.sequence_length,
+                    steps=training_cfg.classifier_steps,
+                    seed=experiment_cfg.seed + epoch,
+                )
+                train_real_metrics = _diffusion_classifier_metrics(
+                    dataset=train_loader.dataset,
+                    real_dataset=train_loader.dataset,
+                    real_label="train",
                     sampler=ema_sampler,
                     samples=training_cfg.classifier_samples,
                     seq_len=data_cfg.sequence_length,
@@ -421,14 +665,53 @@ def main(cfg: DictConfig) -> None:
                         classifier_metrics.get("c2st_accuracy", float("nan")),
                         classifier_metrics.get("c2st_auc", float("nan")),
                     )
-                    if classifier_logger is not None:
-                        classifier_logger.log(
+                    val_metrics = classifier_metrics
+                if train_real_metrics:
+                    logger.info(
+                        "Epoch %d diffusion train-real C2ST accuracy=%.4f auc=%.4f",
+                        epoch,
+                        train_real_metrics.get("c2st_accuracy", float("nan")),
+                        train_real_metrics.get("c2st_auc", float("nan")),
+                    )
+                    train_metrics = train_real_metrics
+                if classifier_logger is not None and classifier_metrics:
+                    payload = {
+                        "epoch": epoch,
+                        "c2st_val_accuracy": classifier_metrics["c2st_accuracy"],
+                        "c2st_val_auc": classifier_metrics["c2st_auc"],
+                    }
+                    if train_real_metrics:
+                        payload.update(
                             {
-                                "epoch": epoch,
-                                "c2st_accuracy": classifier_metrics["c2st_accuracy"],
-                                "c2st_auc": classifier_metrics["c2st_auc"],
+                                "c2st_train_accuracy": train_real_metrics["c2st_accuracy"],
+                                "c2st_train_auc": train_real_metrics["c2st_auc"],
                             }
                         )
+            classifier_logger.log(payload)
+
+    if training_cfg.summary_path:
+        summary_path = Path(to_absolute_path(training_cfg.summary_path))
+        summary = {
+            "experiment_name": experiment_cfg.experiment_name,
+            "last_val_loss": float(last_val_loss) if last_val_loss is not None else None,
+            "best_val_loss": (float(best_val_loss) if best_val_loss != float("inf") else None),
+            "val_c2st_accuracy": val_metrics.get("c2st_accuracy"),
+            "val_c2st_auc": val_metrics.get("c2st_auc"),
+            "val_feature_delta_mean": val_metrics.get("feature_delta_mean"),
+            "train_c2st_accuracy": train_metrics.get("c2st_accuracy"),
+            "train_c2st_auc": train_metrics.get("c2st_auc"),
+        }
+        if training_cfg.sample_eval_count > 0:
+            sample_stats = _compute_sample_stats(
+                ema_sampler,
+                train_loader.dataset,
+                sample_count=training_cfg.sample_eval_count,
+                seq_len=data_cfg.sequence_length,
+                steps=min(training_cfg.sample_eval_steps, training_cfg.classifier_steps),
+            )
+            summary.update(sample_stats)
+        _write_summary(summary_path, summary)
+        logger.info("Saved diffusion summary to %s", summary_path)
 
         if training_cfg.checkpoint_interval > 0 and (
             epoch % training_cfg.checkpoint_interval == 0 or epoch == training_cfg.epochs
@@ -438,6 +721,7 @@ def main(cfg: DictConfig) -> None:
             config_payload = {
                 "model": asdict(model_cfg),
                 "diffusion": asdict(diffusion_cfg),
+                "training": {"objective": training_cfg.objective},
             }
             save_checkpoint(
                 ckpt_path,

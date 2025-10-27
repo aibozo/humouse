@@ -26,6 +26,19 @@ Use this document to track actionable items, progress, and open questions. Updat
 
 ## In Progress
 - 2025-10-24: Plan & implement diffusion generator + D-eval hooks (diffusion package, training loop, metrics integration) — diffusion trainer + DDIM sampler scaffolded; GAN now calls diffusion eval (feature/density metrics) each epoch when configured; diffusion training now records C2ST metrics + CSV logger.
+- 2025-10-26: Diffusion alignment checklist before rerun —
+  - [x] Match GAN data transforms by disabling canonicalize_path/duration in diffusion base config.
+  - [x] Force C2ST to denormalize both real and fake sequences before recomputing neuromotor features so metrics share the exact pipeline.
+  - [x] Keep advanced knobs explicit: AMP now defaults off, min-SNR remains opt-in, and self-conditioning stays configurable per experiment (exp_short_cosine pins it off, 2‐channel ε objective for the next run).
+  - [x] Retain masked-MSE diagnostics (mask sum + target std logging) across objectives to catch silent loss zeroing.
+  - [x] Purged cached canonicalized Balabit splits so the new non-canonical config regenerates stats before the upcoming run.
+  - [x] Validation now mirrors the chosen objective (ε/v) and logs avg mask / target std so train-vs-val mismatches surface immediately.
+  - [x] Diffusion C2ST now samples real gestures from the validation split (user-held-out) while fakes still denormalize with train stats, matching DMTG’s evaluation guidance; fake sequences now borrow Δt traces from the same val batch so features compare identical timing distributions.
+  - [x] Cleared `data/processed/balabit/` cache entirely so upcoming runs rebuild both train/val splits under the new config.
+  - [x] Validation loader now re-normalises sequences/features using **training** stats before loss eval; C2ST logs per-feature mean/std deltas and reports both val-real and train-real accuracies for easier debugging.
+  - [x] DDIM sampler now respects `training.objective` (ε vs v): checkpoints persist the objective, `DiffusionSampler` converts ε predictions via `x0_from_eps`, and helper scripts/tests were updated; older checkpoints can be sampled by passing `objective="epsilon"`.
+  - [x] Added Optuna-based sweep harness (`scripts/search_diffusion.py`) + training summaries so we can score configs via `summary.json` (val loss, C2ST, scale stats) after each short run.
+  - [x] `match_time_channel` helper now feeds C2ST, sample stats, and GAN diffusion eval so every downstream artifact reuses real Δt traces; added `scripts/diffusion_x0_diagnostics.py` to log x̂₀ vs x₀ variance for any checkpoint.
 
 ## Blocked
 - *(empty — add blockers as they arise)*

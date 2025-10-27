@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 
 from diffusion.models import UNet1D, UNet1DConfig
-from diffusion.noise import DiffusionScheduleConfig, build_schedule, eps_from_v, x0_from_v
+from diffusion.noise import DiffusionScheduleConfig, build_schedule, eps_from_v, x0_from_eps, x0_from_v
 
 
 class DiffusionSampler:
@@ -26,6 +26,7 @@ class DiffusionSampler:
         cond_dim: int = 0,
         in_channels: int = 2,
         self_condition: bool = False,
+        objective: str = "v",
     ) -> None:
         self.device = torch.device(device)
         self.model = model.to(self.device).eval()
@@ -33,6 +34,7 @@ class DiffusionSampler:
         self.cond_dim = cond_dim
         self.in_channels = in_channels
         self.self_condition = self_condition
+        self.objective = (objective or "v").lower()
 
     @torch.no_grad()
     def sample(
@@ -62,11 +64,17 @@ class DiffusionSampler:
         for t, t_prev in zip(ddim_timesteps, prev_timesteps):
             t_batch = torch.full((n,), int(t.item()), dtype=torch.long, device=device)
             model_in = x.permute(0, 2, 1)
-            v_pred = self.model(model_in, t_batch, cond=cond_tensor, mask=None, self_cond=self_cond)
-            v_pred = v_pred.permute(0, 2, 1)
+            model_out = self.model(model_in, t_batch, cond=cond_tensor, mask=None, self_cond=self_cond)
+            model_out = model_out.permute(0, 2, 1)
 
             alpha_t, sigma_t = self.schedule.coefficients(t_batch, device=device)
-            x0 = x0_from_v(x, v_pred, alpha_t, sigma_t)
+            if self.objective == "epsilon":
+                eps = model_out
+                x0 = x0_from_eps(x, eps, alpha_t, sigma_t)
+            else:
+                v_pred = model_out
+                x0 = x0_from_v(x, v_pred, alpha_t, sigma_t)
+                eps = eps_from_v(v_pred, x0, alpha_t, sigma_t)
             if self.self_condition:
                 self_cond = x0.permute(0, 2, 1)
 
@@ -76,7 +84,6 @@ class DiffusionSampler:
 
             alpha_prev, _ = self.schedule.coefficients(t_prev.unsqueeze(0), device=device)
             alpha_prev = alpha_prev.expand_as(alpha_t)
-            eps = eps_from_v(v_pred, x0, alpha_t, sigma_t)
             a_t = alpha_t ** 2
             a_prev = torch.clamp(alpha_prev ** 2, min=1e-8)
             if eta > 0.0:
@@ -128,6 +135,7 @@ def load_sampler_from_checkpoint(
     checkpoint_path: str | Path,
     *,
     device: Optional[torch.device | str] = None,
+    objective: Optional[str] = None,
 ) -> DiffusionSampler:
     device = torch.device(device) if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -138,6 +146,9 @@ def load_sampler_from_checkpoint(
     diffusion_cfg_dict = config.get("diffusion")
     if not model_cfg_dict or not diffusion_cfg_dict:
         raise ValueError("Checkpoint config missing 'model' or 'diffusion' entries.")
+
+    training_cfg_dict = config.get("training", {})
+    obj = objective or training_cfg_dict.get("objective", "v")
 
     model_cfg = UNet1DConfig(**model_cfg_dict)
     model = UNet1D(model_cfg)
@@ -157,6 +168,7 @@ def load_sampler_from_checkpoint(
         cond_dim=model_cfg.cond_dim,
         in_channels=model_cfg.in_channels,
         self_condition=model_cfg.self_condition,
+        objective=obj,
     )
     return sampler
 
@@ -173,12 +185,13 @@ def generate_diffusion_samples(
     eta: float = 0.0,
     device: Optional[torch.device | str] = None,
     generator: Optional[torch.Generator] = None,
+    objective: str = "v",
 ) -> torch.Tensor:
     if checkpoint_path is None and (model is None or schedule is None):
         raise ValueError("Provide either a checkpoint_path or both model and schedule.")
 
     if checkpoint_path is not None:
-        sampler = load_sampler_from_checkpoint(checkpoint_path, device=device)
+        sampler = load_sampler_from_checkpoint(checkpoint_path, device=device, objective=objective)
     else:
         device = torch.device(device) if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         sampler = DiffusionSampler(
@@ -188,6 +201,7 @@ def generate_diffusion_samples(
             cond_dim=model.cfg.cond_dim,
             in_channels=model.cfg.in_channels,
             self_condition=model.cfg.self_condition,
+            objective=objective,
         )
     return sampler.sample(n, seq_len, cond=cond, steps=steps, eta=eta, generator=generator)
 

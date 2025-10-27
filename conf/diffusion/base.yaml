@@ -14,8 +14,8 @@ data:
   max_val_gestures: 256
   normalize_sequences: true
   normalize_features: true
-  canonicalize_path: true
-  canonicalize_duration: true
+  canonicalize_path: false
+  canonicalize_duration: false
   include_goal_geometry: false
   feature_mode: "neuromotor"
   sampling_rate: "auto"
@@ -48,7 +48,7 @@ training:
   weight_decay: 0.001
   ema_decay: 0.9995
   grad_clip: 1.0
-  amp: true
+  amp: false
   log_interval: 50
   eval_interval: 1
   checkpoint_dir: "checkpoints/diffusion"

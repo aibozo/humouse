@@ -101,6 +101,14 @@ def x0_from_v(xt: torch.Tensor, v: torch.Tensor, alpha: torch.Tensor, sigma: tor
     return (alpha * xt - sigma * v) / (alpha**2 + sigma**2).clamp_min(1e-12)
 
 
+def x0_from_eps(xt: torch.Tensor, eps: torch.Tensor, alpha: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+    """Recover x0 from epsilon prediction."""
+    while alpha.ndim < xt.ndim:
+        alpha = alpha.unsqueeze(-1)
+        sigma = sigma.unsqueeze(-1)
+    return (xt - sigma * eps) / alpha.clamp_min(1e-12)
+
+
 def eps_from_v(v: torch.Tensor, x0: torch.Tensor, alpha: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
     """Recover epsilon noise from velocity prediction."""
     while alpha.ndim < v.ndim:

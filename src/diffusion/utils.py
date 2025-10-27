@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from typing import Optional
 
 import torch
 
@@ -36,6 +37,21 @@ def infer_mask_from_deltas(deltas: torch.Tensor, eps: float = 1e-6) -> torch.Ten
 def cumulative_positions(deltas: torch.Tensor) -> torch.Tensor:
     """Compute cumulative positions from delta sequences."""
     return torch.cumsum(deltas, dim=-2)
+
+
+def match_time_channel(target: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
+    """Copy Δt channel from reference into target for overlapping batch/time extent."""
+    if target.ndim != 3 or reference.ndim != 3:
+        raise ValueError("match_time_channel expects tensors shaped [B, T, C].")
+    if target.size(-1) < 3 or reference.size(-1) < 3:
+        return target
+    batch = min(target.size(0), reference.size(0))
+    steps = min(target.size(1), reference.size(1))
+    if batch <= 0 or steps <= 0:
+        return target
+    out = target.clone()
+    out[:batch, :steps, 2] = reference[:batch, :steps, 2].to(out.device, dtype=out.dtype)
+    return out
 
 
 class EMAModel:

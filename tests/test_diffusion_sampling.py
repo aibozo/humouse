@@ -22,7 +22,14 @@ def test_diffusion_sampler_generates_expected_shape():
     )
     model = UNet1D(model_cfg)
     schedule = build_schedule(DiffusionScheduleConfig(timesteps=10))
-    sampler = DiffusionSampler(model, schedule, device="cpu", cond_dim=model_cfg.cond_dim, in_channels=model_cfg.in_channels)
+    sampler = DiffusionSampler(
+        model,
+        schedule,
+        device="cpu",
+        cond_dim=model_cfg.cond_dim,
+        in_channels=model_cfg.in_channels,
+        objective="v",
+    )
     samples = sampler.sample(4, 32, steps=5)
     assert samples.shape == (4, 32, model_cfg.in_channels)
     assert torch.isfinite(samples).all()
@@ -46,7 +53,11 @@ def test_generate_samples_from_checkpoint(tmp_path):
     schedule = build_schedule(diffusion_cfg)
 
     ckpt_path = tmp_path / "diffusion_ckpt.pt"
-    config_payload = {"model": asdict(model_cfg), "diffusion": asdict(diffusion_cfg)}
+    config_payload = {
+        "model": asdict(model_cfg),
+        "diffusion": asdict(diffusion_cfg),
+        "training": {"objective": "v"},
+    }
     torch.save(
         {
             "epoch": 1,
@@ -64,3 +75,25 @@ def test_generate_samples_from_checkpoint(tmp_path):
 
     samples_via_helper = generate_diffusion_samples(2, 16, checkpoint_path=ckpt_path, steps=4)
     assert samples_via_helper.shape == (2, 16, model_cfg.in_channels)
+
+
+def test_unet_self_conditioning_changes_input():
+    torch.manual_seed(42)
+    cfg = UNet1DConfig(
+        in_channels=2,
+        out_channels=2,
+        base_channels=8,
+        channel_mults=(1.0,),
+        num_res_blocks=1,
+        self_condition=True,
+        cond_dim=0,
+        use_attention=False,
+    )
+    model = UNet1D(cfg)
+    x = torch.randn(2, cfg.in_channels, 16)
+    t = torch.tensor([0, 1], dtype=torch.long)
+    zeros_out = model(x, t, self_cond=torch.zeros_like(x))
+    ones_out = model(x, t, self_cond=torch.ones_like(x))
+    assert zeros_out.shape == (2, cfg.out_channels, 16)
+    assert not torch.allclose(zeros_out, ones_out)
+    assert model.input_proj.in_channels == cfg.in_channels * 2

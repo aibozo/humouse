@@ -1,5 +1,6 @@
 defaults:
   - /diffusion/base@_here_
+  - _self_
 
 experiment_name: "diff_short_cosine"
 
@@ -8,11 +9,21 @@ diffusion:
   schedule: "cosine"
 
 model:
+  in_channels: 2
+  out_channels: 2
   base_channels: 160
   channel_mults: [1.0, 1.5, 2.0, 2.5]
   num_res_blocks: 3
   use_attention: true
+  self_condition: false
 
 training:
   betas: [0.9, 0.995]
   ema_decay: 0.9997
+  objective: "epsilon"
+  amp: false
+
+data:
+  time_stretch: 0.0
+  jitter_std: 0.0
+  mirror_prob: 0.0

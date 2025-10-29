@@ -9,13 +9,13 @@ from pathlib import Path
 from typing import Optional
 
 import hydra
+import math
 import torch
 import torch.nn.functional as F
 from hydra.core.config_store import ConfigStore
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig, OmegaConf
-from torch import nn
-from torch.cuda.amp import GradScaler, autocast
+from torch import amp, nn
 from torch.nn.utils import clip_grad_norm_
 import numpy as np
 
@@ -104,6 +104,8 @@ class DiffusionTrainingConfig:
     curvature_reg_weight: float = 0.0
     direction_change_reg_warmup_epochs: int = 0
     curvature_reg_warmup_epochs: int = 0
+    loss_skip_threshold: Optional[float] = None
+    log_loss_details: bool = False
     eval_prep: DiffusionEvalPrepConfig = field(default_factory=DiffusionEvalPrepConfig)
     timing_eval: DiffusionTimingEvalConfig = field(default_factory=DiffusionTimingEvalConfig)
 
@@ -869,7 +871,7 @@ def save_checkpoint(
     model: nn.Module,
     ema: EMAModel,
     optimizer: torch.optim.Optimizer,
-    scaler: GradScaler,
+    scaler: amp.GradScaler,
     epoch: int,
     global_step: int,
     config: Optional[dict] = None,
@@ -982,7 +984,10 @@ def main(cfg: DictConfig) -> None:
         betas=training_cfg.betas,
         weight_decay=training_cfg.weight_decay,
     )
-    scaler = GradScaler(enabled=training_cfg.amp and device.type == "cuda")
+    grad_scaler_device = "cuda" if device.type == "cuda" else "cpu"
+    autocast_device_type = grad_scaler_device
+    autocast_enabled = bool(training_cfg.amp and device.type == "cuda")
+    scaler = amp.GradScaler(device=grad_scaler_device, enabled=autocast_enabled)
     ema = EMAModel(model, decay=training_cfg.ema_decay).to(device)
     ema_sampler = DiffusionSampler(
         ema.shadow,
@@ -1012,6 +1017,15 @@ def main(cfg: DictConfig) -> None:
     last_val_loss: Optional[float] = None
     val_metrics: dict[str, float] = {}
     train_metrics: dict[str, float] = {}
+
+    objective = training_cfg.objective.lower()
+    use_min_snr = training_cfg.min_snr_gamma not in (None, 0) and objective == "epsilon"
+    if training_cfg.min_snr_gamma not in (None, 0) and not use_min_snr:
+        logger.warning(
+            "Min-SNR weighting (gamma=%.3f) disabled for objective '%s'.",
+            float(training_cfg.min_snr_gamma),
+            objective,
+        )
 
     global_step = 0
     for epoch in range(1, training_cfg.epochs + 1):
@@ -1044,15 +1058,14 @@ def main(cfg: DictConfig) -> None:
             timesteps = torch.randint(0, schedule.timesteps, (sequences.size(0),), device=device)
             noise = torch.randn_like(sequences)
 
-            with autocast(enabled=scaler.is_enabled()):
+            with amp.autocast(device_type=autocast_device_type, enabled=autocast_enabled):
                 xt, noise = q_sample(schedule, sequences, timesteps, noise=noise)
                 alpha, sigma = schedule.coefficients(timesteps, device=device)
 
                 preds = model(xt.permute(0, 2, 1), timesteps, cond=cond, mask=mask_bool)
                 preds = preds.permute(0, 2, 1)
 
-                obj = training_cfg.objective.lower()
-                if obj == "epsilon":
+                if objective == "epsilon":
                     target = noise
                     x0_hat = x0_from_eps(xt, preds, alpha, sigma)
                 else:
@@ -1060,7 +1073,7 @@ def main(cfg: DictConfig) -> None:
                     x0_hat = x0_from_v(xt, preds, alpha, sigma)
 
                 loss_weights = None
-                if training_cfg.min_snr_gamma not in (None, 0):
+                if use_min_snr:
                     log_snr = schedule.log_snr_at(timesteps, device=device)
                     snr_weights = _min_snr_weight(log_snr, training_cfg.min_snr_gamma)
                     loss_weights = snr_weights.view(-1, 1, 1)
@@ -1072,7 +1085,40 @@ def main(cfg: DictConfig) -> None:
                             tw = tw.to(dtype=preds.dtype)
                         time_weight_cache[preds.dtype] = tw
                     loss_weights = tw if loss_weights is None else loss_weights * tw
-                loss = masked_mse(preds, target, mask_bool, weights=loss_weights)
+                mask_float = mask_bool.to(dtype=preds.dtype)
+                err_sq = (preds - target) ** 2
+                err_sq_unweighted = err_sq * mask_float.unsqueeze(-1)
+                if loss_weights is not None:
+                    weights = loss_weights
+                    while weights.ndim < err_sq.ndim:
+                        weights = weights.unsqueeze(-1)
+                    err_sq = err_sq * weights
+                err_sq = err_sq * mask_float.unsqueeze(-1)
+                denom = (mask_float.sum() * preds.size(-1)).clamp_min(1.0)
+                loss = err_sq.sum() / denom
+                if training_cfg.log_loss_details and training_cfg.log_interval > 0 and (global_step % training_cfg.log_interval == 0):
+                    per_t = err_sq_unweighted.sum(dim=(0, 2)) / (
+                        mask_float.sum(dim=0).clamp_min(1.0) * preds.size(-1)
+                    )
+                    per_b = err_sq_unweighted.sum(dim=(1, 2)) / (
+                        mask_float.sum(dim=1).clamp_min(1.0) * preds.size(-1)
+                    )
+                    top_t_k = int(min(3, per_t.numel()))
+                    top_b_k = int(min(3, per_b.numel()))
+                    if top_t_k > 0:
+                        top_t_val, top_t_idx = torch.topk(per_t, k=top_t_k)
+                        top_t = ", ".join(
+                            f"t={int(idx)}:{float(val):.4f}"
+                            for idx, val in zip(top_t_idx.tolist(), top_t_val.tolist())
+                        )
+                        logger.info("Loss by timestep (top): %s", top_t)
+                    if top_b_k > 0:
+                        top_b_val, top_b_idx = torch.topk(per_b, k=top_b_k)
+                        top_b = ", ".join(
+                            f"b={int(idx)}:{float(val):.4f}"
+                            for idx, val in zip(top_b_idx.tolist(), top_b_val.tolist())
+                        )
+                        logger.info("Loss by sample (top): %s", top_b)
                 if training_cfg.scale_reg_weight > 0:
                     std_hat = _masked_channel_std(x0_hat, mask_bool)
                     target_std = scale_target_std.to(device=std_hat.device, dtype=std_hat.dtype)
@@ -1089,6 +1135,14 @@ def main(cfg: DictConfig) -> None:
                 if curv_weight > 0:
                     curvature_penalty = _curvature_penalty(x0_hat, sequences, mask_bool)
                     loss = loss + curv_weight * curvature_penalty
+                loss_item = float(loss.detach())
+                if training_cfg.loss_skip_threshold is not None:
+                    if not math.isfinite(loss_item) or loss_item > training_cfg.loss_skip_threshold:
+                        logger.warning(
+                            "Skipping batch at step %d due to anomalous loss %.4f", global_step, loss_item
+                        )
+                        optimizer.zero_grad(set_to_none=True)
+                        continue
             if global_step % training_cfg.log_interval == 0:
                 print(
                     f"debug step={global_step} mask_sum={mask_bool.sum().item():.0f} target_std={target.std().item():.4f}"
@@ -1097,8 +1151,8 @@ def main(cfg: DictConfig) -> None:
                 logger.info("Normalized channel std: %s", ", ".join(f"{s:.4f}" for s in norm_std))
 
             scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             if training_cfg.grad_clip > 0:
-                scaler.unscale_(optimizer)
                 clip_grad_norm_(model.parameters(), training_cfg.grad_clip)
             scaler.step(optimizer)
             scaler.update()

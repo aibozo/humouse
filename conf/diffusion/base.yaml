@@ -68,6 +68,8 @@ training:
   curvature_reg_weight: 0.0
   direction_change_reg_warmup_epochs: 5
   curvature_reg_warmup_epochs: 5
+  loss_skip_threshold: null
+  log_loss_details: false
   eval_path_scale_min: 0.05
   eval_path_scale_max: 4.0
   timing_eval:

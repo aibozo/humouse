@@ -2,7 +2,11 @@ import types
 
 import torch
 
-from diffusion.train import _diffusion_classifier_metrics_with_val, _min_snr_weight
+from diffusion.train import (
+    DiffusionEvalPrepConfig,
+    _diffusion_classifier_metrics_with_val,
+    _min_snr_weight,
+)
 
 
 class _DummyDataset:
@@ -51,6 +55,8 @@ def test_diffusion_classifier_metrics_real_equals_fake():
         steps=5,
         seed=1337,
         real_label="dummy",
+        prep_cfg=DiffusionEvalPrepConfig(),
+        timing_sampler=None,
     )
     assert metrics, "Expected classifier metrics when using identical real/fake batches."
     assert abs(metrics["c2st_accuracy"] - 0.5) < 0.15

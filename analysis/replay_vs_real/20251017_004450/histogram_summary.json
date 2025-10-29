@@ -1,0 +1,9 @@
+{
+  "real_sequence_count": 4096,
+  "replay_sequence_count": 5000,
+  "feature_dimension": 37,
+  "feature_hist_samples": 2000,
+  "sequence_plot_samples": 20,
+  "sequence_plot_path": "analysis/replay_vs_real/20251017_004450/trajectory_samples.png",
+  "feature_hist_path": "analysis/replay_vs_real/20251017_004450/sigma_feature_histograms.png"
+}

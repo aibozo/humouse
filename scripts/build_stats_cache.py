@@ -10,6 +10,8 @@ from typing import Any
 from omegaconf import DictConfig, OmegaConf
 
 from data.dataset import GestureDataset, GestureDatasetConfig
+from dataclasses import fields
+
 from train.config_schemas import DataConfig
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,8 @@ def _build_data_config(base: dict[str, Any], args: argparse.Namespace) -> DataCo
         data_dict["sampling_rate"] = args.sampling_rate
     if args.feature_reservoir_size is not None:
         data_dict["feature_reservoir_size"] = args.feature_reservoir_size
+    valid_fields = {f.name for f in fields(DataConfig)}
+    data_dict = {k: v for k, v in data_dict.items() if k in valid_fields}
     return DataConfig(**data_dict)
 
 

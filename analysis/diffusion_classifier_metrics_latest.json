@@ -1,0 +1,8 @@
+{
+  "csv_path": "checkpoints/diffusion/diffusion_classifier_metrics.csv",
+  "latest": {
+    "epoch": 10,
+    "accuracy": 0.8506493506493507,
+    "auc": 0.9053803339517625
+  }
+}

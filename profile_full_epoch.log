@@ -1,0 +1,62 @@
+INFO:root:Profiling on device=cuda for epochs=1, batches=0
+INFO:train.train_gan:Using fixed Δt=0.010000 for warm-start and training
+INFO:train.train_gan:Step 0 | d_loss=0.6131 g_loss=20.7631 feature_l1=0.9528 cov_diff=0.5814 diversity=1.2905
+INFO:train.train_gan:Epoch 1 diagnostics | real_dx_mean=-0.0295, real_dy_mean=-0.0236, real_theta_mean=0.1874, real_theta_std=1.6768, gen_dx_mean=-0.8406, gen_dy_mean=1.2870, gen_theta_mean=1.7279, gen_theta_std=1.1572
+INFO:root:Top CPU operators:
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                          ProfilerStep*        38.79%     177.159ms        85.73%     391.487ms      39.149ms       0.000us         0.00%      61.734ms       6.173ms            10  
+                                       cudaLaunchKernel         8.28%      37.804ms        14.54%      66.378ms       4.854us       0.000us         0.00%       5.664us       0.000us         13676  
+                                        cudaMemcpyAsync         6.53%      29.818ms         6.53%      29.818ms      11.666us       0.000us         0.00%       0.000us       0.000us          2556  
+                       Runtime Triggered Module Loading         6.25%      28.551ms         6.25%      28.551ms      14.276ms       3.776us         0.00%       3.776us       1.888us             2  
+                                  cudaStreamSynchronize         2.94%      13.438ms         2.94%      13.438ms       8.144us       0.000us         0.00%       0.000us       0.000us          1650  
+                                            aten::empty         1.70%       7.774ms         1.70%       7.774ms       1.706us       0.000us         0.00%       0.000us       0.000us          4557  
+                                           aten::addmv_         1.66%       7.599ms         2.39%      10.895ms      11.005us       2.372ms         1.80%       2.372ms       2.396us           990  
+                                            aten::copy_         1.57%       7.177ms        11.10%      50.693ms      16.268us       4.855ms         3.69%       4.869ms       1.563us          3116  
+enumerate(DataLoader)#_MultiProcessingDataLoaderIter...         1.56%       7.133ms         1.59%       7.272ms     727.238us       0.000us         0.00%       0.000us       0.000us            10  
+                                              aten::div         1.55%       7.095ms         2.55%      11.658ms       6.302us       3.506ms         2.66%       3.506ms       1.895us          1850  
+                             aten::convolution_backward         1.40%       6.371ms         3.26%      14.904ms      64.801us      44.599ms        33.88%      47.694ms     207.364us           230  
+                                              aten::mul         1.20%       5.459ms         1.84%       8.406ms       7.063us       1.851ms         1.41%       1.851ms       1.556us          1190  
+                               Optimizer.step#Adam.step         1.10%       5.014ms         2.18%       9.942ms     497.088us       0.000us         0.00%       3.777ms     188.836us            20  
+                                aten::cudnn_convolution         1.08%       4.933ms         1.55%       7.058ms      25.206us      24.804ms        18.84%      24.804ms      88.584us           280  
+                               aten::linalg_vector_norm         0.95%       4.355ms         1.42%       6.502ms       9.289us       1.742ms         1.32%       1.781ms       2.544us           700  
+                                    aten::empty_strided         0.86%       3.937ms         0.86%       3.937ms       1.367us       0.000us         0.00%       0.000us       0.000us          2880  
+                                       aten::as_strided         0.83%       3.799ms         0.83%       3.799ms       0.386us       0.000us         0.00%       0.000us       0.000us          9850  
+                                              aten::sum         0.79%       3.590ms         1.15%       5.267ms       8.496us       4.666ms         3.54%       4.666ms       7.525us           620  
+                                             aten::add_         0.77%       3.524ms         1.61%       7.348ms       5.068us       5.018ms         3.81%       5.021ms       3.463us          1450  
+                                           aten::select         0.69%       3.164ms         0.97%       4.435ms       1.024us       0.000us         0.00%       0.000us       0.000us          4330  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 456.663ms
+Self CUDA time total: 131.649ms
+
+INFO:root:Top CUDA operators:
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                          ProfilerStep*         0.00%       0.000us         0.00%       0.000us       0.000us     382.266ms       290.37%     382.266ms      38.227ms            10  
+                             aten::convolution_backward         1.40%       6.371ms         3.26%      14.904ms      64.801us      44.599ms        33.88%      47.694ms     207.364us           230  
+                                aten::cudnn_convolution         1.08%       4.933ms         1.55%       7.058ms      25.206us      24.804ms        18.84%      24.804ms      88.584us           280  
+sm86_xmma_fprop_implicit_gemm_tf32f32_tf32f32_f32_nh...         0.00%       0.000us         0.00%       0.000us       0.000us      19.811ms        15.05%      19.811ms      99.057us           200  
+sm80_xmma_dgrad_implicit_gemm_tf32f32_tf32f32_f32_nh...         0.00%       0.000us         0.00%       0.000us       0.000us      16.809ms        12.77%      16.809ms     105.056us           160  
+sm86_xmma_wgrad_implicit_gemm_indexed_tf32f32_tf32f3...         0.00%       0.000us         0.00%       0.000us       0.000us      15.289ms        11.61%      15.289ms     127.406us           120  
+void cudnn::engines_precompiled::nchwToNhwcKernel<fl...         0.00%       0.000us         0.00%       0.000us       0.000us      11.353ms         8.62%      11.353ms      11.826us           960  
+                        aten::cudnn_batch_norm_backward         0.30%       1.373ms         0.59%       2.690ms      17.930us       5.911ms         4.49%       5.911ms      39.409us           150  
+void cudnn::bn_bw_1C11_kernel_new<float, float, floa...         0.00%       0.000us         0.00%       0.000us       0.000us       5.911ms         4.49%       5.911ms      39.409us           150  
+                                             aten::add_         0.77%       3.524ms         1.61%       7.348ms       5.068us       5.018ms         3.81%       5.021ms       3.463us          1450  
+                                            aten::copy_         1.57%       7.177ms        11.10%      50.693ms      16.268us       4.855ms         3.69%       4.869ms       1.563us          3116  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       4.700ms         3.57%       4.700ms       4.392us          1070  
+                                              aten::sum         0.79%       3.590ms         1.15%       5.267ms       8.496us       4.666ms         3.54%       4.666ms       7.525us           620  
+                               aten::threshold_backward         0.20%     895.973us         0.32%       1.454ms       6.610us       4.607ms         3.50%       4.607ms      20.940us           220  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       4.607ms         3.50%       4.607ms      20.940us           220  
+void at::native::elementwise_kernel<128, 2, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us       4.556ms         3.46%       4.556ms       9.111us           500  
+                               Optimizer.step#Adam.step         0.00%       0.000us         0.00%       0.000us       0.000us       4.391ms         3.34%       4.391ms     219.539us            20  
+void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us       4.346ms         3.30%       4.346ms       8.869us           490  
+                                        aten::clamp_min         0.37%       1.675ms         0.60%       2.742ms       7.411us       3.702ms         2.81%       3.702ms      10.005us           370  
+                                              aten::div         1.55%       7.095ms         2.55%      11.658ms       6.302us       3.506ms         2.66%       3.506ms       1.895us          1850  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 456.663ms
+Self CUDA time total: 131.649ms
+
+INFO:root:Training summary: g_loss=16.5174 | d_loss=0.2912
+INFO:root:Profiler run complete. Re-launch with --trace to capture a Chrome trace if needed.

@@ -132,12 +132,33 @@ def compute_feature_matrix(gestures: Iterable[GestureSequence]) -> np.ndarray:
     return np.vstack(vectors) if vectors else np.empty((0, len(FEATURE_SPECS)), dtype=np.float32)
 
 
-def tensor_to_gesture(sequence: torch.Tensor, dataset_id: str = "generated", split: str = "train") -> GestureSequence:
+def _contiguous_mask(mask: np.ndarray) -> np.ndarray:
+    if mask.ndim != 1:
+        mask = mask.reshape(-1)
+    valid_len = int(np.round(mask.sum()))
+    contiguous = np.zeros_like(mask, dtype=np.float32)
+    if valid_len > 0:
+        contiguous[:valid_len] = 1.0
+    return contiguous
+
+
+def tensor_to_gesture(
+    sequence: torch.Tensor,
+    dataset_id: str = "generated",
+    split: str = "train",
+    mask: Optional[torch.Tensor] = None,
+) -> GestureSequence:
     seq_np = sequence.detach().cpu().numpy().astype(np.float32)
-    mask = np.ones(seq_np.shape[0], dtype=np.float32)
-    dx = seq_np[:, 0]
-    dy = seq_np[:, 1]
-    dt = seq_np[:, 2]
+    if mask is not None:
+        mask_np = mask.detach().cpu().numpy().astype(np.float32)
+    else:
+        magnitudes = np.abs(seq_np).sum(axis=1)
+        mask_np = (magnitudes > 1e-6).astype(np.float32)
+    mask_np = _contiguous_mask(mask_np)
+    valid_len = int(mask_np.sum())
+    dx = seq_np[:valid_len, 0]
+    dy = seq_np[:valid_len, 1]
+    dt = seq_np[:valid_len, 2]
     duration = float(dt.sum())
     path_length = float(np.sum(np.sqrt(dx**2 + dy**2)))
     cumulative_x = np.cumsum(np.concatenate([[0.0], dx]))
@@ -154,7 +175,7 @@ def tensor_to_gesture(sequence: torch.Tensor, dataset_id: str = "generated", spl
         session_id="sample",
         split=split,
         sequence=seq_np,
-        mask=mask,
+        mask=mask_np,
         duration=duration,
         path_length=path_length,
         original_event_count=seq_np.shape[0] + 1,
@@ -162,7 +183,7 @@ def tensor_to_gesture(sequence: torch.Tensor, dataset_id: str = "generated", spl
     )
 
 
-def compute_features_from_sequence(sequence: torch.Tensor) -> torch.Tensor:
-    gesture = tensor_to_gesture(sequence)
+def compute_features_from_sequence(sequence: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    gesture = tensor_to_gesture(sequence, mask=mask)
     features = compute_features(gesture)
     return torch.from_numpy(features)

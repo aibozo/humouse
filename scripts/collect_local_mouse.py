@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-id", type=str, default="local_mouse", help="Dataset identifier to embed in manifests.")
     parser.add_argument("--split", type=str, default="train", help="Dataset split tag (e.g., train/val/test).")
     parser.add_argument("--sampling-hz", type=float, default=200.0, help="Polling frequency for pointer position.")
-    parser.add_argument("--gesture-idle", type=float, default=2.0, help="Seconds of inactivity to close a gesture.")
+    parser.add_argument("--gesture-idle", type=float, default=1.0, help="Seconds of inactivity to close a gesture.")
     parser.add_argument("--session-idle", type=float, default=300.0, help="Seconds of inactivity to close a session.")
     parser.add_argument("--sequence-length", type=int, default=64, help="Resampled sequence length for stored gestures.")
     parser.add_argument("--jitter-threshold", type=float, default=8.0, help="Path-length threshold (pixels) to flag jitter gestures.")
@@ -72,6 +72,36 @@ def parse_args() -> argparse.Namespace:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging verbosity.",
     )
+    parser.add_argument(
+        "--ui",
+        action="store_true",
+        help="Launch a basic Tkinter UI to control the collector and manage session labels.",
+    )
+    parser.add_argument(
+        "--session-types",
+        type=str,
+        nargs="+",
+        default=["unspecified", "poker", "osrs", "browser", "other"],
+        help="Preset session types to surface in the UI dropdown (ignored without --ui).",
+    )
+    parser.add_argument(
+        "--default-session-type",
+        type=str,
+        default="unspecified",
+        help="Initial session type label applied to collected gestures.",
+    )
+    parser.add_argument(
+        "--default-notes",
+        type=str,
+        default=None,
+        help="Optional notes to attach to the session context.",
+    )
+    parser.add_argument(
+        "--linked-gap-seconds",
+        type=float,
+        default=0.2,
+        help="Gap threshold (seconds) to link successive gestures into a sequence bucket.",
+    )
     return parser.parse_args()
 
 
@@ -98,8 +128,24 @@ def main() -> None:
         direction_buckets=args.direction_buckets,
         include_stationary_bucket=not args.no_stationary_bucket,
         split_on_click=not args.no_click_split,
+        initial_session_type=args.default_session_type,
+        initial_notes=args.default_notes,
+        linked_gesture_gap_seconds=args.linked_gap_seconds,
     )
-    collector.run()
+    if args.ui:
+        session_types = list(dict.fromkeys(args.session_types or []))
+        if args.default_session_type and args.default_session_type not in session_types:
+            session_types.append(args.default_session_type)
+        try:
+            from tools.collector_ui import CollectorUI
+        except ImportError as exc:  # pragma: no cover - UI optional dependency
+            logging.error("UI mode requested but unavailable: %s", exc)
+            sys.exit(1)
+
+        ui = CollectorUI(collector=collector, session_types=session_types)
+        ui.run()
+    else:
+        collector.run()
 
 
 if __name__ == "__main__":

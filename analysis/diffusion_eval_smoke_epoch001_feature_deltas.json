@@ -1,0 +1,72 @@
+[
+  {
+    "feature": "jerk_std",
+    "real_mean": -2.176966518163681e-08,
+    "fake_mean": 237900922880.0,
+    "delta": 237900922880.0,
+    "real_std": 0.9999999403953552
+  },
+  {
+    "feature": "jerk_mean",
+    "real_mean": 6.28642737865448e-09,
+    "fake_mean": -148472758272.0,
+    "delta": -148472758272.0,
+    "real_std": 0.9999999403953552
+  },
+  {
+    "feature": "acc_std",
+    "real_mean": -1.862645149230957e-08,
+    "fake_mean": 4253411.5,
+    "delta": 4253411.5,
+    "real_std": 0.9999998807907104
+  },
+  {
+    "feature": "acc_mean",
+    "real_mean": -1.507578417658806e-08,
+    "fake_mean": 1687130.375,
+    "delta": 1687130.375,
+    "real_std": 0.9999997615814209
+  },
+  {
+    "feature": "avg_velocity",
+    "real_mean": -5.122274160385132e-09,
+    "fake_mean": 487.73828125,
+    "delta": 487.73828125,
+    "real_std": 0.9999998807907104
+  },
+  {
+    "feature": "peak_velocity",
+    "real_mean": 9.778887033462524e-09,
+    "fake_mean": 196.83799743652344,
+    "delta": 196.83799743652344,
+    "real_std": 1.0
+  },
+  {
+    "feature": "velocity_std",
+    "real_mean": 2.2817403078079224e-08,
+    "fake_mean": 174.70742797851562,
+    "delta": 174.70742797851562,
+    "real_std": 1.0
+  },
+  {
+    "feature": "time_to_peak_velocity",
+    "real_mean": -3.748573362827301e-08,
+    "fake_mean": 2.6257622241973877,
+    "delta": 2.6257622241973877,
+    "real_std": 1.0000004768371582
+  },
+  {
+    "feature": "path_efficiency",
+    "real_mean": -8.067581802606583e-08,
+    "fake_mean": 0.8969669938087463,
+    "delta": 0.8969670534133911,
+    "real_std": 0.9999997615814209
+  },
+  {
+    "feature": "path_length",
+    "real_mean": 1.3969838619232178e-09,
+    "fake_mean": -0.8702907562255859,
+    "delta": -0.8702907562255859,
+    "real_std": 0.9999999403953552
+  }
+]

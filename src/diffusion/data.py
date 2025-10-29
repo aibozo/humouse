@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
@@ -10,6 +11,8 @@ from torch.utils.data import DataLoader
 
 from data.dataset import GestureDataset, GestureDatasetConfig
 from diffusion.utils import infer_mask_from_deltas
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -36,10 +39,69 @@ class DiffusionDataConfig:
     time_stretch: float = 0.0
     jitter_std: float = 0.0
     mirror_prob: float = 0.0
+    max_channel_std: Optional[float] = None
+    max_delta_abs: Optional[float] = None
+    outlier_log_limit: int = 10
 
     def __post_init__(self) -> None:
         if isinstance(self.feature_mode, str):
             self.feature_mode = self.feature_mode.lower()
+        if self.max_channel_std is not None and self.max_channel_std <= 0:
+            raise ValueError("max_channel_std must be positive when set.")
+        if self.max_delta_abs is not None and self.max_delta_abs <= 0:
+            raise ValueError("max_delta_abs must be positive when set.")
+        self.outlier_log_limit = max(0, int(self.outlier_log_limit))
+
+
+def _filter_dataset_outliers(
+    dataset: GestureDataset,
+    *,
+    max_channel_std: Optional[float],
+    max_delta_abs: Optional[float],
+    log_limit: int,
+) -> int:
+    if max_channel_std is None and max_delta_abs is None:
+        return 0
+
+    kept: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+    removed: list[tuple[int, float, float]] = []
+    for idx, (seq, feats, label) in enumerate(dataset.samples):
+        mask = (seq.abs().sum(dim=-1) > 0)
+        if mask.any():
+            valid = seq[mask]
+            xy = valid[:, :2]
+            max_std = float(xy.std(dim=0, unbiased=False).max())
+            max_abs = float(xy.abs().max())
+        else:
+            max_std = 0.0
+            max_abs = 0.0
+
+        drop = False
+        if max_channel_std is not None and max_std > max_channel_std:
+            drop = True
+        if max_delta_abs is not None and max_abs > max_delta_abs:
+            drop = True
+
+        if drop:
+            removed.append((idx, max_std, max_abs))
+            continue
+        kept.append((seq, feats, label))
+
+    if removed:
+        dataset.samples = kept
+        msg_details = ", ".join(
+            f"[idx={idx} std={std:.3f} abs={abs_val:.3f}]" for idx, std, abs_val in removed[:log_limit]
+        )
+        if log_limit and len(removed) > log_limit:
+            msg_details += f", ... (+{len(removed) - log_limit} more)"
+        logger.warning(
+            "Filtered %d diffusion samples exceeding thresholds (max_std=%s, max_abs=%s): %s",
+            len(removed),
+            max_channel_std,
+            max_delta_abs,
+            msg_details if msg_details else "details suppressed",
+        )
+    return len(removed)
 
 
 def build_diffusion_dataset(
@@ -89,6 +151,14 @@ def create_dataloader(
     shuffle: bool,
 ) -> DataLoader:
     dataset = build_diffusion_dataset(cfg, split=split, max_gestures=max_gestures)
+    removed = _filter_dataset_outliers(
+        dataset,
+        max_channel_std=cfg.max_channel_std,
+        max_delta_abs=cfg.max_delta_abs,
+        log_limit=cfg.outlier_log_limit,
+    )
+    if removed:
+        logger.info("Dataset size after outlier filtering: %d samples", len(dataset))
     loader_kwargs = {
         "batch_size": cfg.batch_size,
         "shuffle": shuffle,

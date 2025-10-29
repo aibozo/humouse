@@ -1,0 +1,97 @@
+experiment_name: train_gan_paper_uncond
+seed: 2021
+
+data:
+  dataset_id: bogazici
+  sequence_length: 200
+  sampling_rate: auto
+  batch_size: 128
+  num_workers: 32
+  prefetch_factor: 1
+  max_gestures: 4096
+  cache_enabled: true
+  cache_dir: data/processed
+  feature_mode: sigma_lognormal
+  normalize_sequences: false
+  normalize_features: false
+  canonicalize_path: false
+  canonicalize_duration: false
+  include_goal_geometry: false
+  use_click_boundaries: true
+  min_path_length: 10.0
+  direction_buckets: null
+  rotate_to_buckets: false
+
+model:
+  architecture: lstm
+  generator:
+    latent_dim: 100
+    condition_dim: 0
+    hidden_dim: 128
+    target_len: 200
+    num_layers: 2
+    use_spectral_norm: false
+    output_dim: 2
+    activation_xy: linear
+    activation_dt: none
+  discriminator:
+    input_dim: 2
+    condition_dim: 0
+    hidden_dim: 128
+    num_layers: 2
+    use_spectral_norm: false
+
+training:
+  epochs: 50
+  lr:
+    generator: 0.0002
+    discriminator: 0.0002
+  betas: [0.5, 0.999]
+  gradient_penalty_weight: 0.0
+  discriminator_steps: 1
+  log_interval: 100
+  sample_interval: 50
+  replay_buffer_path: checkpoints/gan_paper_uncond/replay_buffer.pt
+  replay_samples_per_epoch: 0
+  replay_buffer_max_size: 0
+  co_train_detector: false
+  detector_update_every: 0
+  detector_config_path: null
+  detector_epochs_per_update: 0
+  reconstruction_epochs: 0
+  reconstruction_loss_weight: 1.0
+  adversarial_type: vanilla
+  sigma_eval_enabled: true
+  sigma_eval_interval: 1
+  sigma_eval_samples: 512
+  sigma_eval_dataset_id: null
+  sigma_eval_max_gestures: 4096
+  absolute_coordinates: true
+  generator_init_path: null
+  curvature_match_weight: 0.0
+  lateral_match_weight: 0.0
+  direction_match_weight: 0.0
+  warmup_encoder_hidden_dim: 128
+  warmup_encoder_layers: 1
+  warmup_encoder_dropout: 0.0
+  warmup_noise_std: 0.0
+  warmup_latent_normalize: false
+  warmup_kl_weight: 0.0
+  reset_generator_after_warmup: false
+  cold_start_epochs: 0
+  sigma_feature_device: auto
+  feature_workers: 32
+  sigma_freeze_upper: null
+  sigma_freeze_lower: null
+  label_smoothing_real: 1.0
+  label_smoothing_fake: 0.0
+  r1_gamma: 0.0
+
+logging:
+  target: wandb
+  project: mouse-gan
+  entity: null
+  mode: offline
+  log_interval: 100
+  checkpoint_dir: checkpoints/gan_paper_uncond
+  tags: [paper, becaptcha, unconditioned]

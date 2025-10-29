@@ -1,0 +1,7 @@
+{
+  "log_path": "outputs/diffusion_short_runs/timing_integration_direct/train.log",
+  "path_length_scale": {
+    "median": 0.484,
+    "p95": 4.0
+  }
+}

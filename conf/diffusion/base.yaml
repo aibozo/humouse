@@ -22,6 +22,9 @@ data:
   time_stretch: 0.15
   jitter_std: 0.02
   mirror_prob: 0.5
+  max_channel_std: 10.0
+  max_delta_abs: 5000.0
+  outlier_log_limit: 5
 
 model:
   in_channels: 3
@@ -56,3 +59,34 @@ training:
   eval_classifier: true
   classifier_samples: 2048
   classifier_steps: 50
+  balance_time_steps: true
+  time_weight_max: 4.0
+  scale_reg_weight: 0.2
+  scale_reg_channels: [0, 1]
+  path_length_reg_weight: 0.1
+  direction_change_reg_weight: 0.0
+  curvature_reg_weight: 0.0
+  direction_change_reg_warmup_epochs: 5
+  curvature_reg_warmup_epochs: 5
+  eval_path_scale_min: 0.05
+  eval_path_scale_max: 4.0
+  timing_eval:
+    enabled: true
+    checkpoint_path: "checkpoints/timing/timing_model.pt"
+    cache_dir: datasets
+    dataset_id: "balabit"
+    split: train
+    temperature: 1.0
+    profile_mix: 0.5
+    duration_mix: 0.25
+    clip_quantile: 0.94
+    clip_multiplier: 1.002
+    max_duration: null
+    min_profile_value: 0.0001
+  eval_prep:
+    force_deltas_when_missing_dt: true
+    clamp_delta_t: true
+    clamp_percentile: 0.5
+    clamp_value: null
+    log_batch_stats: true
+    match_length_distribution: true

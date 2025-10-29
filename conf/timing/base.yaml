@@ -1,0 +1,28 @@
+dataset_id: "balabit"
+cache_dir: "datasets"
+sequence_length: 64
+
+model:
+  feature_dim: 32
+  hidden_dim: 128
+  num_layers: 2
+  dropout: 0.1
+  sequence_length: 64
+  min_concentration: 5.0
+  max_concentration: 30.0
+
+training:
+  epochs: 20
+  lr: 0.001
+  weight_decay: 0.0001
+  batch_size: 512
+  num_workers: 0
+  pin_memory: true
+  dirichlet_weight: 0.5
+  checkpoint_path: "checkpoints/timing/timing_model.pt"
+  sigma_prior_weight: 0.1
+  log_sigma_range: 0.5
+  profile_smoothing: 0.001
+  progress_weight: 0.1
+  balance_time_steps: true
+  template_target_weight: 0.2

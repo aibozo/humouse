@@ -1,0 +1,148 @@
+DMTG — Human‑Like Mouse Trajectory Generation via Entropy‑Controlled Diffusion (arXiv:2410.18233, 2024‑10‑23)
+==============================================================================================
+
+This note distills the most implementation‑relevant parts of **DMTG: A Human‑Like Mouse Trajectory Generation Bot Based on Entropy‑Controlled Diffusion Networks** (Liu, Cui, Ge, Zhan; arXiv:2410.18233) for building / reproducing a diffusion model that synthesizes human‑like mouse trajectories and for using it as a hard‑negative source in bot detection.
+
+Sources checked
+---------------
+• ArXiv record: 2410.18233 (title/authors/date).  
+• Secondary summaries indicating: (i) **entropy‑controlled** diffusion with an **α‑DDIM** sampling variant; (ii) **U‑Net** backbone; (iii) white‑box & black‑box CAPTCHA evaluations; (iv) reported reduction in bot‑detector accuracy by **4.75–9.73%** versus baselines; (v) use of **SapiMouse** among datasets.  
+• SapiMouse dataset spec (120 users; event‑driven sampling; timestamp,x,y,button,state).
+
+(Where exact hyperparameters are not given in publicly available summaries, this note flags “unspecified” and provides **sane defaults** that have worked well in practice for trajectory diffusion.)
+
+Core problem setup
+------------------
+Goal: learn p(x) over **2D cursor delta sequences** x₀ ∈ ℝ^{T×C}, C∈{2,3} for (Δx,Δy[,Δt]), such that samples resemble human mouse motion (initiation, curvature, micro‑corrections, speed‑profiles) and can *challenge* behavior‑based detectors.
+
+Representation & invariances
+----------------------------
+• **Sequence space**: model **deltas** (Δx,Δy[,Δt]). Keep Δt fixed during modeling unless variable timing is essential.  
+• **Re‑centering**: start position at (0,0).  
+• **Canonical rotation** (recommended): rotate each trajectory so **net displacement** points to **+x**; rotate back after sampling.  
+• **Normalization**: per‑channel standardization on the **train split**.  
+• **Masking**: pad to T_max; keep `mask[B,T]` to ignore pads in loss.
+
+Model (backbone)
+----------------
+• **1D temporal U‑Net** over time with sinusoidal **t‑embeddings** injected via FiLM; optional **self‑conditioning** (concat x̂₀ from a teacher pass).  
+• **Attention at bottleneck** (multi‑head) to help long‑range structure.  
+• Output channels match input (predict ε or v).
+
+Diffusion objective (training)
+------------------------------
+Let ε ~ 𝓝(0,I), ᾱ_t ∈ (0,1) be the **cumulative** noise schedule.
+
+Forward (noising):             x_t = √ᾱ_t · x₀ + √(1−ᾱ_t) · ε.
+
+Two common parameterizations supported by DMTG‑style setups:
+
+1) **ε‑prediction** (DDPM loss):  
+   minimize  𝐸_{t,ε} [ ‖ ε̂_θ(x_t, t, cond) − ε ‖² ]  over **valid steps**.
+
+2) **v‑prediction** (better‑conditioned): define v = √ᾱ_t · ε − √(1−ᾱ_t) · x₀,  
+   minimize  𝐸_{t,ε} [ ‖ v̂_θ(x_t, t, cond) − v ‖² ]  over **valid steps**.
+
+• **Masked loss**: multiply per‑step error by `mask` before reduction to avoid zeroing gradients via broadcast mistakes.  
+• **Min‑SNR weighting** (optional): up‑weight mid‑noise steps to reduce small/large‑t dominance.  
+• **EMA**: maintain exponential moving average of weights for sampling.
+
+Entropy‑controlled sampling (α‑DDIM idea)
+-----------------------------------------
+DMTG introduces a **scalar control c ∈ [0,1]** that modulates **local entropy/complexity** during deterministic‑style DDIM sampling. Intuition: higher c → more micro‑jitter / curvature (closer to human corrective sub‑movements); lower c → smoother, more ballistic paths.
+
+• **Base DDIM step** (schematic):
+  1) Predict ε̂ or v̂ at step t; reconstruct x̂₀ from the prediction.
+  2) Deterministic update toward x̂₀ using ᾱ_{t−1}, optionally adding a controlled stochastic term.
+
+• **Entropy control**: c affects the effective variance or guidance strength per step; for implementations without the paper’s exact α‑DDIM formula, **expose c** by:
+  – interpolating between **deterministic** (η=0) and **stochastic** (η>0) DDIM with η = η₀·c, and  
+  – modulating a small **score‑noise** or **guidance scale** term proportional to c.
+
+Conditioning
+------------
+• Minimal: global scalars (e.g., total path length, start→goal vector).  
+• Optional: neuromotor / lognormal feature vector computed per real sequence; inject via FiLM at each block.  
+• Entropy control c is an additional conditioning scalar.
+
+Datasets referenced / useful
+----------------------------
+• **SapiMouse** (120 users; event‑driven logs; session CSVs with timestamp,x,y,button,state). Suitable for training and user‑held‑out validation.  
+• Additional HCI mouse datasets summarized in **ReMouse** survey (e.g., Balabit, Bogazici, crowdsourced “Attentive Cursor” logs)—useful for OOD tests and unseen‑style evaluation.
+
+Reported evaluation protocol & headline results
+-----------------------------------------------
+• **White‑box**: statistical similarity + detector tests (train a classifier on real vs generated).  
+• **Black‑box**: attempts against commercial behavioral CAPTCHA services / simulators, to measure bypass success.  
+• **Headline** reported: **4.75–9.73%** *reduction* in detection accuracy vs prior generators (context: bot‑detector accuracy drops). *(Exact testbed details require the PDF; numbers are from public summaries.)*
+
+What to measure in your pipeline (plain‑English)
+------------------------------------------------
+• **C2ST** (probe classifier on kinematic features): accuracy → 50–60% on **validation** means close distributions.  
+• **MMD/KID** on features: lower is better.  
+• **PRD** (Precision–Recall for Distributions): precision ≈ realism, recall ≈ coverage; diffusion should raise **recall** over GANs.  
+• **Spectral parity**: FFT power of velocity; match both mid‑ and high‑frequency bands (micro‑corrections).  
+• **Kinematics**: jerk, path‑efficiency (displacement/path length), mean abs heading‑change, lateral RMS in canonical frame.  
+• **Unseen‑bot generalization**: detector AUC on negative mixes (diffusion + GAN + heuristic bots) and on **unseen** generators.
+
+Training hyperparameters
+------------------------
+**Paper‑specific LRs/epochs are not specified in public summaries.** Use these *practical defaults* on a single 3090 (adjust if overfitting/underfitting):
+• Optimizer: **AdamW** (lr **2e‑4**, betas (0.9, 0.999), weight decay **1e‑2**), grad‑clip **1.0**.  
+• UNet widths: 128→192→256→256, 4 down / 4 up, dropout **0.1**, bottleneck attention (d_model≈256, heads=4).  
+• Steps: **1000** training timesteps; **DDIM 20** steps for sampling; **EMA=0.999**.  
+• Batch: **64** (or 32 if T is large); **epochs: 50–100** with user/device‑held‑out validation.  
+• Augmentations: ±10–20% time‑stretch; small local time‑warp; micro‑jitter in Δx/Δy; left–right flip; sub‑trajectory crops.
+
+Implementation checklist (gotchas)
+----------------------------------
+1) **Schedule math**: use **cumulative** ᾱ_t for forward/noise terms; avoid mixing per‑step α_t.  
+2) **Masked loss**: `loss = ((pred−target)**2 * mask[...,None]).sum() / mask.sum().clamp_min(1)`.  
+3) **Transforms**: apply **identical** de/normalization + (inverse) rotation to **both** real and fake before metrics.  
+4) **ε‑vs‑v sanity**: if v‑pred stalls, try ε‑pred for 200 steps to isolate schedule bugs.  
+5) **Entropy control**: plumb scalar **c** end‑to‑end; validate that increasing c indeed raises high‑freq power & heading variance.  
+6) **Metrics on validation**: never mix train users into val for C2ST/MMD/PRD; prefer **user/device‑held‑out** splits.
+
+Pseudocode sketch (ε‑objective with masked loss & entropy‑controlled DDIM)
+--------------------------------------------------------------------------
+# training
+for (x0, mask, cond) in loader:
+    t ~ Uniform{0..T-1}
+    ε ~ N(0, I)
+    x_t = sqrt(ᾱ_t) * x0 + sqrt(1-ᾱ_t) * ε
+    ε̂ = model(x_t, t_embed(t), cond)
+    loss = ((ε̂ - ε)**2 * mask[...,None]).sum() / mask.sum().clamp_min(1)
+    loss.backward(); clip_grad_norm_(θ, 1.0); opt.step(); opt.zero_grad(); ema.update(θ)
+
+# sampling (DDIM, with entropy control c ∈ [0,1] exposed as η)
+x = randn_like(x0);  # x_T
+for t in reversed(1..T):
+    ε̂ = model(x, t_embed(t), cond_with_c)
+    x̂0 = (x - sqrt(1-ᾱ_t) * ε̂) / sqrt(ᾱ_t)
+    η = η0 * c                       # e.g., η0≈0.2
+    σ = η * sqrt( (1-ᾱ_{t-1})/(1-ᾱ_t) ) * sqrt(1-ᾱ_t)
+    x = sqrt(ᾱ_{t-1}) * x̂0 + sqrt(1-ᾱ_{t-1}) * ε̂ + σ * randn_like(x)
+
+After sampling: de‑normalize, rotate back, **cumsum(Δx,Δy)** → positions for plots.
+
+Related / context papers & data
+-------------------------------
+• **DMTG** (arXiv:2410.18233): diffusion for mouse trajectories with entropy‑control; U‑Net; α‑DDIM; white/black‑box CAPTCHA tests; headline bot‑detector accuracy drop by 4.75–9.73%.  
+• **SapiAgent** (IEEE Access 2021): deep autoencoder‑based human‑like mouse trajectory generator on **SapiMouse**; useful non‑diffusion baseline.  
+• **Mouse‑tracking + Drift Diffusion Model** (Cognitive Science 2021; Behavior Research Methods 2025): connects motion kinematics with decision dynamics; valuable for choosing features/priors for realism metrics.  
+• **ReMouse dataset/survey (MDPI 2023)**: catalogs mouse‑trajectory datasets (Balabit, Bogazici, SapiMouse, etc.); good for OOD detector tests.
+
+Practical acceptance gates (use this to “green‑light” the model)
+----------------------------------------------------------------
+[ ] ε‑ or v‑loss decreases; no NaNs; grad norms healthy.  
+[ ] **C2ST_val ≤ ~60%**, **MMD_val ↓**, **PRD recall** improves vs GAN baseline.  
+[ ] Spectral & kinematic overlays of **validation** converge (including high‑freq tail).  
+[ ] Detector trained on **mixed negatives** (diffusion + GAN + heuristics) shows **high AUC** on **unseen** bot styles.  
+[ ] Increasing entropy control **c** yields measurable rises in high‑freq power & heading‑change variance.
+
+Notes
+-----
+• Where the exact α‑DDIM entropy injection formula is needed, consult the arXiv PDF for the precise schedule‑modulation equation; the control‑by‑η approach above is a practical stand‑in that matches the public description of “entropy‑controlled” sampling.
+
+• Always keep real/fake pipelines symmetric (same normalization, same rotations, same canonicalization flags) before computing any metric or training a detector; many “perfect (1.0) classifier” outcomes are due to preprocessing mismatches, not generation quality.
+

@@ -549,6 +549,27 @@ class GestureDataset(Dataset):
         if config_meta.get("feature_mode", self.config.feature_mode) != self.config.feature_mode:
             return False
 
+        config_checks = {
+            "dataset_id": self.config.dataset_id,
+            "sequence_length": self.config.sequence_length,
+            "canonicalize_path": self.config.canonicalize_path,
+            "canonicalize_duration": self.config.canonicalize_duration,
+            "include_goal_geometry": self.config.include_goal_geometry,
+            "sampling_rate": self.config.sampling_rate,
+            "direction_buckets": sorted(self.config.direction_buckets or []),
+            "rotate_to_buckets": self.config.rotate_to_buckets,
+            "min_path_length": self.config.min_path_length,
+        }
+        for key, expected in config_checks.items():
+            stored = config_meta.get(key, expected)
+            if isinstance(expected, list):
+                stored_list = list(stored) if isinstance(stored, list) else []
+                if stored_list != expected:
+                    return False
+            else:
+                if stored != expected:
+                    return False
+
         requested_reservoir = int(self.config.feature_reservoir_size or 0)
         stored_reservoir = int(meta.get("feature_reservoir_size", 0))
         if requested_reservoir != stored_reservoir:
@@ -602,6 +623,15 @@ class GestureDataset(Dataset):
                 "normalize_features": self.config.normalize_features,
                 "feature_mode": self.config.feature_mode,
                 "feature_reservoir_size": int(self.config.feature_reservoir_size or 0),
+                "dataset_id": self.config.dataset_id,
+                "sequence_length": self.config.sequence_length,
+                "canonicalize_path": self.config.canonicalize_path,
+                "canonicalize_duration": self.config.canonicalize_duration,
+                "include_goal_geometry": self.config.include_goal_geometry,
+                "sampling_rate": self.config.sampling_rate,
+                "direction_buckets": sorted(self.config.direction_buckets or []),
+                "rotate_to_buckets": self.config.rotate_to_buckets,
+                "min_path_length": self.config.min_path_length,
             },
         }
         try:

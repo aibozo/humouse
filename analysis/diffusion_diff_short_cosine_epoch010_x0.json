@@ -1,0 +1,19 @@
+{
+  "checkpoint": "/home/kil/dev/humouse/checkpoints/diffusion/diff_short_cosine_epoch010.pt",
+  "objective": "epsilon",
+  "batches": 8,
+  "avg_mse": 0.41888776794075966,
+  "avg_mae": 0.1456559505313635,
+  "sequence_std": [
+    0.9977787733078003,
+    0.992669939994812
+  ],
+  "xhat_std": [
+    0.6269157528877258,
+    0.6069540977478027
+  ],
+  "std_ratio": [
+    0.6283113748846323,
+    0.6114359600241092
+  ]
+}

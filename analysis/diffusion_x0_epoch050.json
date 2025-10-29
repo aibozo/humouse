@@ -1,0 +1,19 @@
+{
+  "checkpoint": "/home/kil/dev/humouse/checkpoints/diffusion/diffusion_epoch050.pt",
+  "objective": "v",
+  "batches": 5,
+  "avg_mse": 0.6737489700317383,
+  "avg_mae": 0.3544709086418152,
+  "sequence_std": [
+    0.9922305941581726,
+    0.9467005729675293
+  ],
+  "xhat_std": [
+    0.7476938962936401,
+    0.7545143365859985
+  ],
+  "std_ratio": [
+    0.7535485205714685,
+    0.7969936409998111
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "log_path": "outputs/diffusion_short_runs/timing_integration_direct/train.log",
+  "stats": {
+    "real_val": {
+      "delta_std": 59.93,
+      "dt_median": 0.124,
+      "dt_min": 0.124,
+      "dt_max": 0.124,
+      "vel_median": 93.55,
+      "vel_p95": 1365.0
+    },
+    "fake": {
+      "delta_std": 349.0,
+      "dt_median": 0.1167,
+      "dt_min": 0.03031,
+      "dt_max": 0.8974,
+      "vel_median": 176.8,
+      "vel_p95": 9569.0
+    },
+    "fake_eval": {
+      "delta_std": 98.34,
+      "dt_median": 0.1167,
+      "dt_min": 0.03031,
+      "dt_max": 0.8974,
+      "vel_median": 79.87,
+      "vel_p95": 2669.0
+    }
+  }
+}

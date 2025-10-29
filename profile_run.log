@@ -1,0 +1,24 @@
+INFO:root:Profiling on device=cuda for epochs=1, batches=1
+INFO:train.train_gan:Using fixed Δt=0.010000 for warm-start and training
+INFO:train.train_gan:Step 0 | d_loss=0.7780 g_loss=20.3463 feature_l1=0.7567 cov_diff=0.5604 diversity=1.2827
+INFO:train.train_gan:Epoch 1 diagnostics | real_dx_mean=0.0602, real_dy_mean=0.0705, real_theta_mean=0.3543, real_theta_std=1.7046, gen_dx_mean=-2.2332, gen_dy_mean=0.7453, gen_theta_mean=1.0855, gen_theta_std=2.2789
+INFO:root:Top CPU operators:
+-------------------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                     Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg    # of Calls  
+-------------------------  ------------  ------------  ------------  ------------  ------------  ------------  
+            ProfilerStep*        98.77%     663.934us        98.77%     663.934us     663.934us             1  
+    cudaDeviceSynchronize         1.23%       8.275us         1.23%       8.275us       8.275us             1  
+-------------------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 672.209us
+
+INFO:root:Top CUDA operators:
+-------------------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                     Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg    # of Calls  
+-------------------------  ------------  ------------  ------------  ------------  ------------  ------------  
+            ProfilerStep*        98.77%     663.934us        98.77%     663.934us     663.934us             1  
+    cudaDeviceSynchronize         1.23%       8.275us         1.23%       8.275us       8.275us             1  
+-------------------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 672.209us
+
+INFO:root:Training summary: g_loss=20.3463 | d_loss=0.7780
+INFO:root:Profiler run complete. Re-launch with --trace to capture a Chrome trace if needed.

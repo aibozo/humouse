@@ -35,7 +35,8 @@ def apply_default_augmentations(
             seq[flip_mask, :, 1] = seq[flip_mask, :, 1] * -1.0
 
     if jitter_std > 0:
-        noise = torch.randn_like(seq[..., :2], generator=generator) * jitter_std
+        noise_shape = seq[..., :2].shape
+        noise = torch.randn(noise_shape, device=device, dtype=dtype, generator=generator) * jitter_std
         seq[..., :2] = seq[..., :2] + noise * mask_tensor.unsqueeze(-1)
 
     if time_stretch > 0 and seq.size(-1) >= 3:

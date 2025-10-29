@@ -1,0 +1,46 @@
+{
+  "log_path": "outputs/diffusion_short_runs/timing_integration_direct/train.log",
+  "epoch": 10,
+  "features": [
+    {
+      "feature": "direction_changes",
+      "\u03bc_real": -0.361,
+      "\u03bc_fake": 0.496,
+      "\u0394\u03bc": 0.857,
+      "\u03c3_real": 0.571,
+      "\u03c3_fake": 1.484
+    },
+    {
+      "feature": "path_efficiency",
+      "\u03bc_real": 0.272,
+      "\u03bc_fake": -0.224,
+      "\u0394\u03bc": -0.496,
+      "\u03c3_real": 0.974,
+      "\u03c3_fake": 0.79
+    },
+    {
+      "feature": "duration",
+      "\u03bc_real": -0.139,
+      "\u03bc_fake": 0.086,
+      "\u0394\u03bc": 0.225,
+      "\u03c3_real": 0.684,
+      "\u03c3_fake": 0.851
+    },
+    {
+      "feature": "path_length",
+      "\u03bc_real": -0.086,
+      "\u03bc_fake": 0.04,
+      "\u0394\u03bc": 0.126,
+      "\u03c3_real": 0.2,
+      "\u03c3_fake": 0.434
+    },
+    {
+      "feature": "idle_ratio",
+      "\u03bc_real": -0.093,
+      "\u03bc_fake": -0.216,
+      "\u0394\u03bc": -0.123,
+      "\u03c3_real": 0.87,
+      "\u03c3_fake": 1.235
+    }
+  ]
+}
